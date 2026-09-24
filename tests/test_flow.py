@@ -305,3 +305,17 @@ def test_same_place_by_name_containment():
     assert router.same_place("The Wandering Star", "Wandering Star cargo bay")
     assert not router.same_place("Efate system", "Efate startown freight brokers' hall")
     assert not router.same_place(None, "Regina")
+
+
+def test_edit_last_message_replaces_exchange(tmp_path):
+    settings = Settings(_env_file=None, vault_path=tmp_path, gatekeeper_enabled=False)
+    dm = FakeLLM(stream_rounds=[[{"content": "You go left."}], [{"content": "You go right."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2),
+                 archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        client.post(f"/api/campaigns/{slug}/chat", json={"content": "left"})
+        client.post(f"/api/campaigns/{slug}/edit", json={"content": "right"})
+        msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
+        assert [m["content"] for m in msgs] == ["right", "You go right."]
+        assert [m["content"] for m in dm.calls[1][1][1:]] == ["right"]
