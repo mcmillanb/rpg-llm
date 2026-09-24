@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import admin, compactor, context, router, wiki
+from rpg_llm import admin, compactor, context, router, suggest, wiki
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -271,6 +271,27 @@ class NewCampaign(BaseModel):
     system: str = ""
     premise: str = ""
     dm_instructions: str = ""
+    allow_rewind: bool = False
+
+
+class PremiseAsk(BaseModel):
+    system: str = ""
+    seed: str = ""
+    avoid: list[str] = []
+
+
+def can_rewind(c: Campaign) -> bool:
+    """Rewinding = changing or re-rolling a turn after seeing the GM's reply. Off by default so
+    outcomes stick; a campaign can allow it."""
+    return bool(c.meta.get("allow_rewind"))
+
+
+def replied(msgs: list[dict]) -> bool:
+    """True if the last exchange has a real GM reply (not missing, not empty)."""
+    return bool(msgs) and msgs[-1]["role"] == "assistant" and bool(msgs[-1]["content"].strip())
+
+
+NO_REWIND = "Rewinds are off for this campaign: the GM's reply stands. (Allow them in the campaign's settings.)"
 
 
 class Say(BaseModel):
@@ -314,7 +335,28 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns")
     async def create_campaign(body: NewCampaign):
         c = R().vault.create(body.name, body.premise, body.system, body.dm_instructions)
+        c.save_meta({**c.meta, "allow_rewind": body.allow_rewind})
         return {"slug": c.slug}
+
+    @app.delete("/api/campaigns/{slug}")
+    async def delete_campaign(slug: str):
+        rt = R()
+        c = rt.campaign(slug)
+        if rt.st(slug)["compacting"] or rt.turns.get(slug):
+            raise HTTPException(409, "the campaign is busy; try again in a moment")
+        return {"ok": True, "moved_to": str(rt.vault.trash(c))}
+
+    @app.get("/api/suggest/systems")
+    async def suggest_systems(refresh: bool = False):
+        rt = R()
+        rt.require_configured()
+        return await suggest.systems(rt.dm, rt.vault.root, refresh)
+
+    @app.post("/api/suggest/premise")
+    async def suggest_premise(body: PremiseAsk):
+        rt = R()
+        rt.require_configured()
+        return {"premise": await suggest.premise(rt.dm, body.system, body.seed, body.avoid)}
 
     @app.get("/api/campaigns/{slug}")
     async def get_campaign(slug: str):
@@ -322,7 +364,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         c = rt.campaign(slug)
         rt.touch(slug)
         state = c.load_state()
-        return {"slug": c.slug, "meta": c.meta, "messages": c.messages(),
+        return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
+                "messages": c.messages(),
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
                 "status": rt.st(c.slug)}
 
@@ -363,6 +406,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         msgs = c.messages()
         if not msgs:
             raise HTTPException(400, "nothing to regenerate")
+        if replied(msgs) and not can_rewind(c):
+            raise HTTPException(403, NO_REWIND)
         dead = [msgs[-1]["id"]] if msgs[-1]["role"] == "assistant" else []
         user = msgs[-2] if dead else msgs[-1]
         router.undo_scenes_from(c, user["id"])
@@ -380,6 +425,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
         if last_user is None:
             raise HTTPException(400, "no player message to edit")
+        if replied(msgs) and not can_rewind(c):
+            raise HTTPException(403, NO_REWIND)
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
         c.append({"role": "user", "content": body.content.strip(), "supersedes": dead})
@@ -396,6 +443,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
         if last_user is None:
             raise HTTPException(400, "nothing to unsend")
+        if replied(msgs) and not can_rewind(c):
+            raise HTTPException(409, "Too late: the GM had already replied.")
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
         c.append({"role": "system", "content": "", "supersedes": dead, "unsent": True})

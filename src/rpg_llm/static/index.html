@@ -95,6 +95,21 @@ footer { border-top: 1px solid var(--line); background: var(--panel);
 pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
 .hidden { display: none !important; }
+.game { display: flex; align-items: center; gap: 12px; }
+.game .gameinfo { flex: 1; min-width: 0; }
+.game .del { border: 0; background: transparent; opacity: .45; font-size: 16px; }
+.game .del:hover { opacity: 1; }
+#modal { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.45);
+  display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 5vh 16px; }
+.sheet { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px 18px 18px; width: min(720px, 100%); }
+.sheethead { display: flex; justify-content: space-between; align-items: center; }
+.sheet select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.small { font-size: 12px; margin-top: 4px; }
+.sheet a { color: var(--accent); cursor: pointer; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+label.check input { width: auto; }
 </style>
 </head>
 <body>
@@ -102,6 +117,7 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
   <header>
     <button id="back" class="hidden" title="Campaigns">←</button>
     <h1 id="title">RPG LLM</h1>
+    <button id="newBtn" class="primary hidden">+ New campaign</button>
     <button id="themeBtn" title="Light / dark">☾</button>
     <a href="/admin" title="Settings"><button>⚙</button></a>
     <button id="archiveBtn" class="hidden">Archive</button>
@@ -117,6 +133,7 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
     </div>
   </footer>
 </div>
+<div id="modal" class="hidden"></div>
 <aside id="drawer">
   <header><h1>Archive</h1><button id="closeDrawer">✕</button></header>
   <div class="body ui" id="drawerBody"></div>
@@ -170,7 +187,11 @@ function md(src) {
 // ---- api -----------------------------------------------------------------
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
-  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  if (!r.ok) {
+    const text = await r.text();
+    let msg = text; try { msg = JSON.parse(text).detail || text; } catch {}
+    throw new Error(msg || r.statusText);
+  }
   return r.json();
 }
 
@@ -197,29 +218,113 @@ async function showList() {
   history.replaceState(null, "", "/");
   $("title").textContent = "Campaigns";
   ["back", "archiveBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
+  $("newBtn").classList.remove("hidden");
   const list = await api("/api/campaigns");
-  $("view").innerHTML = `
-    ${list.map(c => `<div class="card link" data-slug="${esc(c.slug)}">
-        <strong>${esc(c.name)}</strong>
-        <div class="ui muted">${esc(c.system || "")}${c.last_activity ? " · last played " + new Date(c.last_activity * 1000).toLocaleString() : " · not started"}</div>
-      </div>`).join("") || '<p class="muted ui">No campaigns yet.</p>'}
-    <div class="card ui">
-      <strong>New campaign</strong>
-      <label>Name</label><input id="nName" placeholder="Traveller: The Spinward Run">
-      <label>Game system / setting</label><input id="nSystem" placeholder="Traveller (Mongoose 2e), Third Imperium">
-      <label>Premise: setting, your character, where the story starts</label>
-      <textarea id="nPremise" rows="6"></textarea>
-      <label>Extra GM instructions (tone, style, anything else)</label>
-      <textarea id="nExtra" rows="3" placeholder="Gritty and grounded. Keep replies under 250 words."></textarea>
-      <p><button class="primary" id="create">Create</button></p>
-    </div>`;
+  $("view").innerHTML = list.map(c => `<div class="card link game" data-slug="${esc(c.slug)}">
+      <div class="gameinfo"><strong>${esc(c.name)}</strong>
+        <div class="ui muted">${esc(c.system || "")}${c.last_activity ? " · last played " + new Date(c.last_activity * 1000).toLocaleString() : " · not started"}</div></div>
+      <button class="del" data-del="${esc(c.slug)}" title="Delete this game">🗑</button>
+    </div>`).join("") || `<div class="card ui muted">No campaigns yet. Start one with <strong>+ New campaign</strong> above.</div>`;
   document.querySelectorAll(".card.link").forEach(el => el.onclick = () => openCampaign(el.dataset.slug));
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    const name = list.find(c => c.slug === b.dataset.del)?.name;
+    if (!confirm(`Delete “${name}”?\n\nIt's moved to the vault's trash folder, so it can be recovered from disk.`)) return;
+    try { await api(`/api/campaigns/${b.dataset.del}`, { method: "DELETE" }); showList(); }
+    catch (err) { alert(err.message); }
+  });
+}
+
+// ---- new campaign ----------------------------------------------------------
+const OTHER = "__other__";
+let NEW = { seed: "", avoid: [] };
+
+function openNewCampaign() {
+  NEW = { seed: "", avoid: [] };
+  $("modal").innerHTML = `<div class="sheet ui">
+    <div class="sheethead"><strong>New campaign</strong><button id="nClose">✕</button></div>
+    <label>Name</label><input id="nName" placeholder="Traveller: The Spinward Run">
+    <label>Game system / setting</label>
+    <select id="nSystemPick"><option value="">Loading what the GM knows…</option></select>
+    <div id="nSystemBlurb" class="muted small"></div>
+    <input id="nSystem" class="hidden" placeholder="Any game or setting, e.g. Mothership, or your own world">
+    <div class="muted small"><a id="nRefresh">↻ ask the GM again</a></div>
+    <label>Premise <span class="muted">(optional): your character, where the story starts, or an idea to build on</span></label>
+    <textarea id="nPremise" rows="7" placeholder="Leave blank to let the GM invent the opening, type your own idea, or use Suggest."></textarea>
+    <div class="row-actions">
+      <button id="nSuggest">✨ Suggest premise</button>
+      <button id="nAnother" disabled>↻ Try another</button>
+      <span id="nPremiseMsg" class="muted small"></span>
+    </div>
+    <label>Extra GM instructions <span class="muted">(optional)</span></label>
+    <textarea id="nExtra" rows="2" placeholder="Gritty and grounded. Keep replies under 250 words."></textarea>
+    <label class="check"><input type="checkbox" id="nRewind"> Allow rewinds: let me edit my last move or re-roll the GM's reply after seeing it</label>
+    <div class="muted small">Off keeps outcomes final, like a real table. You can always take a message back while the GM is still replying (Esc).</div>
+    <div class="row-actions"><button class="primary" id="create">Create campaign</button><button id="nCancel">Cancel</button></div>
+  </div>`;
+  $("modal").classList.remove("hidden");
+  $("nName").focus();
+  const close = () => $("modal").classList.add("hidden");
+  $("nClose").onclick = close; $("nCancel").onclick = close;
+  $("modal").onclick = (e) => { if (e.target === $("modal")) close(); };
+  loadSystems(false);
+  $("nRefresh").onclick = () => loadSystems(true);
+  $("nSystemPick").onchange = systemChanged;
+  $("nSuggest").onclick = () => suggestPremise(true);
+  $("nAnother").onclick = () => suggestPremise(false);
   $("create").onclick = async () => {
     const name = $("nName").value.trim(); if (!name) return $("nName").focus();
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
-      name, system: $("nSystem").value, premise: $("nPremise").value, dm_instructions: $("nExtra").value }) });
-    openCampaign(slug);
+      name, system: chosenSystem(), premise: $("nPremise").value, dm_instructions: $("nExtra").value,
+      allow_rewind: $("nRewind").checked }) });
+    close(); openCampaign(slug);
   };
+}
+
+let SYSTEMS = [];
+async function loadSystems(refresh) {
+  const pick = $("nSystemPick");
+  pick.innerHTML = `<option value="">${refresh ? "Asking the GM again…" : "Loading what the GM knows…"} (first time takes ~30 s)</option>`;
+  pick.disabled = true;
+  try {
+    SYSTEMS = (await api(`/api/suggest/systems${refresh ? "?refresh=1" : ""}`)).systems;
+  } catch (e) { SYSTEMS = []; }
+  const groups = {};
+  for (const s of SYSTEMS) (groups[s.genre || "Other"] ||= []).push(s);
+  pick.innerHTML = `<option value="">Choose a game system…</option>` +
+    Object.entries(groups).map(([g, items]) => `<optgroup label="${esc(g)}">${items.map(s =>
+      `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("") +
+    `<option value="${OTHER}">Other (type your own)…</option>`;
+  pick.disabled = false;
+  if (!SYSTEMS.length) { pick.value = OTHER; systemChanged(); }
+}
+function systemChanged() {
+  const v = $("nSystemPick").value;
+  $("nSystem").classList.toggle("hidden", v !== OTHER);
+  if (v === OTHER) $("nSystem").focus();
+  $("nSystemBlurb").textContent = SYSTEMS.find(s => s.name === v)?.blurb || "";
+}
+function chosenSystem() {
+  const v = $("nSystemPick").value;
+  return v === OTHER ? $("nSystem").value.trim() : v;
+}
+
+// "Suggest" builds on whatever is typed (blank = a fresh idea); "Try another" keeps that same
+// starting point and asks for something different from the earlier suggestions.
+async function suggestPremise(fresh) {
+  if (fresh) NEW = { seed: $("nPremise").value.trim(), avoid: [] };
+  const btns = [$("nSuggest"), $("nAnother")];
+  btns.forEach(b => b.disabled = true);
+  $("nPremiseMsg").textContent = "The GM is thinking up a premise…";
+  try {
+    const r = await api("/api/suggest/premise", { method: "POST", body: JSON.stringify({
+      system: chosenSystem(), seed: NEW.seed, avoid: NEW.avoid }) });
+    $("nPremise").value = r.premise;
+    NEW.avoid.push(r.premise);
+    $("nPremiseMsg").textContent = NEW.seed ? "Built on your idea. Edit it freely." : "Edit it freely, or try another.";
+  } catch (e) { $("nPremiseMsg").textContent = "Couldn't get a suggestion: " + e.message; }
+  $("nSuggest").disabled = false;
+  $("nAnother").disabled = !NEW.avoid.length;
 }
 
 // ---- chat ----------------------------------------------------------------
@@ -229,6 +334,7 @@ async function openCampaign(slug) {
   S.data = await api(`/api/campaigns/${slug}`);
   $("title").textContent = S.data.meta.name;
   ["back", "archiveBtn", "footer"].forEach(id => $(id).classList.remove("hidden"));
+  $("newBtn").classList.add("hidden");
   renderChat(true);
   updateStatus(S.data.status, S.data.scenes);
   startPoll();
@@ -240,10 +346,22 @@ function sceneFor(id) {
   return sc;
 }
 
+// A turn "failed" when the player's message got no reply, or an empty one (an error, or it
+// was stopped). Only then is Retry offered; editing after a real reply needs rewinds allowed.
+function lastTurnFailed() {
+  const last = S.data.messages[S.data.messages.length - 1];
+  return !!last && (last.role === "user" || !last.content.trim());
+}
+function canEditLast() { return S.data.can_rewind || lastTurnFailed(); }
+
 function msgHTML(m, isLastUser, isLastGm) {
   if (m.role === "user") {
+    const unanswered = S.data.messages[S.data.messages.length - 1] === m;
+    const btns = [];
+    if (isLastUser && !S.busy && canEditLast()) btns.push(`<button data-act="edit">Edit</button>`);
+    if (unanswered && !S.busy) btns.push(`<button data-act="retry">↻ Retry</button>`);
     return `<div class="msg user" data-id="${m.id}">${md(m.content)}
-      ${isLastUser && !S.busy ? `<div class="meta actions"><button data-act="edit">Edit</button>${S.data.messages[S.data.messages.length - 1] === m ? ` <button data-act="retry">↻ Retry</button>` : ""}</div>` : ""}</div>`;
+      ${btns.length ? `<div class="meta actions">${btns.join(" ")}</div>` : ""}</div>`;
   }
   const chips = [];
   if (m.injected?.length) chips.push(`<span class="chip" title="${esc(m.injected.join(", "))}">📜 ${m.injected.length} from archive</span>`);
@@ -262,7 +380,7 @@ function msgHTML(m, isLastUser, isLastGm) {
   return `<div class="msg assistant" data-id="${m.id}">
     ${m.reasoning ? `<details class="think"><summary>thinking</summary><div>${esc(m.reasoning)}</div></details>` : ""}
     <div class="body">${md(m.content)}</div>
-    <div class="meta">${chips.join("")}${isLastGm && !S.busy ? `<span class="actions"><button data-act="regen">↻ Regenerate</button></span>` : ""}</div>
+    <div class="meta">${chips.join("")}${isLastGm && !S.busy && (!m.content.trim() || S.data.can_rewind) ? `<span class="actions"><button data-act="regen" title="${m.content.trim() ? "Rewind: ask the GM again for this turn" : "Retry this turn"}">↻ ${m.content.trim() ? "Re-roll" : "Retry"}</button></span>` : ""}</div>
   </div>`;
 }
 
@@ -312,7 +430,7 @@ async function cancelTurn() {
         const r = await api(`/api/campaigns/${S.slug}/unsend`, { method: "POST" });
         $("input").value = r.content; autosize(); $("input").focus();
         return "Message taken back: finish it and send again.";
-      } catch (e) { return `Couldn't take it back: ${e.message}`; }
+      } catch (e) { return e.message; }
     })();
   }
   S.abort.abort();
@@ -388,6 +506,10 @@ function regenerate() {
 function startEditing() {
   const m = [...S.data.messages].reverse().find(x => x.role === "user");
   if (!m) return;
+  if (!canEditLast()) {
+    $("statusline").textContent = "Rewinds are off for this campaign: the GM's reply stands.";
+    return;
+  }
   S.editing = m;
   $("input").value = m.content; autosize();
   $("input").setSelectionRange(m.content.length, m.content.length);
@@ -488,6 +610,7 @@ document.addEventListener("keydown", (e) => {
 });
 $("send").onclick = send;
 $("back").onclick = showList;
+$("newBtn").onclick = openNewCampaign;
 $("archiveBtn").onclick = openDrawer;
 $("closeDrawer").onclick = () => $("drawer").classList.remove("open");
 (async () => {

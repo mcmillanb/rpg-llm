@@ -1,0 +1,58 @@
+"""LLM suggestions for setting up a campaign: which game systems the GM model knows, and
+starting premises."""
+
+import json
+import re
+import time
+from pathlib import Path
+
+from rpg_llm import prompts
+from rpg_llm.llm import NO_THINKING, LLMClient
+
+SYSTEMS_SCHEMA = {
+    "type": "object",
+    "properties": {"systems": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "genre": {"type": "string"},
+                       "blurb": {"type": "string"}},
+        "required": ["name", "genre", "blurb"], "additionalProperties": False}}},
+    "required": ["systems"], "additionalProperties": False,
+}
+
+
+def _cache_file(vault_root: Path, model: str) -> Path:
+    return vault_root / ".cache" / f"systems-{re.sub(r'[^A-Za-z0-9._-]+', '_', model)}.json"
+
+
+async def systems(dm: LLMClient, vault_root: Path, refresh: bool = False) -> dict:
+    """What the GM model says it can run. Cached per model: its knowledge doesn't change."""
+    cache = _cache_file(vault_root, dm.slot.model)
+    if cache.exists() and not refresh:
+        return json.loads(cache.read_text())
+    data = await dm.json([{"role": "user", "content": prompts.SYSTEMS_TASK}],
+                         SYSTEMS_SCHEMA, max_tokens=3000)
+    seen, items = set(), []
+    for s in data.get("systems", []):
+        name = (s.get("name") or "").strip()
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            items.append({"name": name, "genre": s.get("genre", ""), "blurb": s.get("blurb", "")})
+    out = {"model": dm.slot.model, "systems": items, "at": time.time()}
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    return out
+
+
+async def premise(dm: LLMClient, system: str, seed: str = "", avoid: list[str] | None = None) -> str:
+    """A starting premise. `seed` is the player's own idea to build on; `avoid` holds earlier
+    suggestions so "try another" gives something different."""
+    seed_text = f"\nThe player's idea, to build on and keep: {seed.strip()}\n" if seed.strip() else ""
+    avoid = [a for a in (avoid or []) if a.strip()][-4:]
+    avoid_text = ("\nAlready suggested (write something clearly different: another character, "
+                  "place and hook):\n" + "\n".join(f"- {a[:300]}" for a in avoid) + "\n") if avoid else ""
+    msg = await dm.chat(
+        [{"role": "user", "content": prompts.PREMISE_TASK.format(
+            system=system.strip() or "any setting you know well", seed=seed_text, avoid=avoid_text)}],
+        max_tokens=600, temperature=1.0, extra_body=NO_THINKING)
+    text = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip()
+    return re.sub(r"^(premise|opening premise)\s*:\s*", "", text, flags=re.I)

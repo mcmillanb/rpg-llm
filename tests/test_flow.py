@@ -224,7 +224,7 @@ def test_regenerate_replaces_last_reply(tmp_path):
     rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2),
                  archiver=FakeLLM())
     with TestClient(create_app(rt)) as client:
-        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        slug = client.post("/api/campaigns", json={"name": "T", "allow_rewind": True}).json()["slug"]
         client.post(f"/api/campaigns/{slug}/chat", json={"content": "go"})
         client.post(f"/api/campaigns/{slug}/regenerate")
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
@@ -313,7 +313,7 @@ def test_edit_last_message_replaces_exchange(tmp_path):
     rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2),
                  archiver=FakeLLM())
     with TestClient(create_app(rt)) as client:
-        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        slug = client.post("/api/campaigns", json={"name": "T", "allow_rewind": True}).json()["slug"]
         client.post(f"/api/campaigns/{slug}/chat", json={"content": "left"})
         client.post(f"/api/campaigns/{slug}/edit", json={"content": "right"})
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
@@ -429,16 +429,45 @@ async def test_gatekeeper_skips_what_is_already_in_play(vault):
     assert info["injected"] == ["npcs/pell.md"]
 
 
-def test_unsend_withdraws_last_message_and_reply(tmp_path):
+def test_unsend_withdraws_a_message_the_gm_has_not_answered(tmp_path):
     settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
-    dm = FakeLLM(stream_rounds=[[{"content": "One."}], [{"content": "Two."}]])
-    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2), archiver=FakeLLM())
+    dm = FakeLLM(stream_rounds=[[{"content": "One."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)]), archiver=FakeLLM())
     with TestClient(create_app(rt)) as client:
         slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
         client.post(f"/api/campaigns/{slug}/chat", json={"content": "first"})
-        client.post(f"/api/campaigns/{slug}/chat", json={"content": "oops, half a thou"})
+        # as if Esc was pressed mid-reply: the message is in, no reply saved yet
+        rt.vault.get(slug).append({"role": "user", "content": "oops, half a thou"})
         r = client.post(f"/api/campaigns/{slug}/unsend").json()
         assert r["content"] == "oops, half a thou"
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
         assert [m["content"] for m in msgs] == ["first", "One."]
         assert msgs[-1]["stats"]["total"] >= 0 and "first_word" in msgs[-1]["stats"]
+        # once the GM has replied it's too late (rewinds are off by default)
+        assert client.post(f"/api/campaigns/{slug}/unsend").status_code == 409
+
+
+def test_rewinds_are_off_by_default_but_failed_turns_can_be_retried(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[[{"content": "It works."}], [{"content": "Retried."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        assert client.get(f"/api/campaigns/{slug}").json()["can_rewind"] is False
+        client.post(f"/api/campaigns/{slug}/chat", json={"content": "go"})
+        assert client.post(f"/api/campaigns/{slug}/regenerate").status_code == 403
+        assert client.post(f"/api/campaigns/{slug}/edit", json={"content": "x"}).status_code == 403
+        # a turn that got no reply (error, or stopped) can be retried
+        rt.vault.get(slug).append({"role": "user", "content": "next"})
+        assert client.post(f"/api/campaigns/{slug}/regenerate").status_code == 200
+        msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
+        assert [m["content"] for m in msgs][-2:] == ["next", "Retried."]
+
+
+def test_delete_from_play_page_moves_to_trash(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()))
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "Old"}).json()["slug"]
+        assert client.delete(f"/api/campaigns/{slug}").status_code == 200
+        assert client.get("/api/campaigns").json() == []
+        assert (tmp_path / "trash").exists()

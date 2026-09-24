@@ -197,3 +197,25 @@ master will need to continue: names, what was said and agreed, positions, injuri
 {previous}
 Transcript:
 {transcript}"""
+
+SYSTEMS_TASK = """\
+List the tabletop role-playing game systems and settings you know well enough to run
+confidently as a story-first game master for a solo player: you know the setting's world, tone,
+factions and typical adventures, even if you don't know every rule. Only include ones you
+genuinely know in depth. Aim for 12-20, across genres, most familiar first.
+
+Return JSON: systems, a list of {name, genre, blurb}. name is how players know it (e.g.
+"Traveller (Third Imperium)"), genre one or two words, blurb one short sentence on the feel."""
+
+PREMISE_TASK = """\
+Write the opening premise for a solo tabletop RPG campaign.
+
+Game system / setting: {system}
+{seed}{avoid}
+Cover, in 120-180 words of plain prose (no headings, no lists):
+- the player character: a name, who they are, one thing they are good at, one thing weighing on
+  them
+- where and how the story opens, grounded in the setting's feel
+- an immediate hook or problem that pulls them into the adventure
+
+Leave room for the player: don't decide what they do next. Write only the premise."""

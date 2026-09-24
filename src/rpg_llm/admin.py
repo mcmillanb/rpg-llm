@@ -6,7 +6,6 @@ admin is open, which is what a first run needs.
 
 import re
 import secrets
-import shutil
 import time
 
 import httpx2
@@ -51,6 +50,7 @@ class CampaignEdit(BaseModel):
     system: str = ""
     premise: str = ""
     dm_instructions: str = ""
+    allow_rewind: bool = False
 
 
 class ImportIn(BaseModel):
@@ -247,6 +247,7 @@ def register(app: FastAPI, R) -> None:
             out.append({
                 "slug": c.slug, **{k: c.meta.get(k, "") for k in
                                    ("name", "system", "premise", "dm_instructions")},
+                "allow_rewind": bool(c.meta.get("allow_rewind")),
                 "messages": len(c.messages()), "scenes": len(state.scenes),
                 "filed": sum(s.status == "compacted" for s in state.scenes),
                 "wiki_entries": len(c.gazetteer()), "last_activity": c.last_activity(),
@@ -271,11 +272,7 @@ def register(app: FastAPI, R) -> None:
         c = rt.campaign(slug)
         if rt.st(slug)["compacting"]:
             raise HTTPException(409, "the campaign is being filed; try again shortly")
-        trash = rt.vault.root / "trash"
-        trash.mkdir(exist_ok=True)
-        dest = trash / f"{slug}-{time.strftime('%Y%m%d-%H%M%S')}"
-        shutil.move(str(c.root), dest)
-        return {"ok": True, "moved_to": str(dest)}
+        return {"ok": True, "moved_to": str(rt.vault.trash(c))}
 
     @app.post("/api/admin/campaigns/{slug}/rebuild", dependencies=auth)
     async def rebuild(slug: str):

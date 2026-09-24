@@ -373,6 +373,8 @@ async function loadCampaigns() {
           <div><label>Game system / setting</label><input data-f="system" value="${esc(c.system)}"></div></div>
         <label>Premise</label><textarea data-f="premise" rows="4">${esc(c.premise)}</textarea>
         <label>Extra GM instructions</label><textarea data-f="dm_instructions" rows="3">${esc(c.dm_instructions)}</textarea>
+        <label class="inline" style="margin-top:10px"><input type="checkbox" data-f="allow_rewind" ${c.allow_rewind ? "checked" : ""}>
+          Allow rewinds (edit the last move or re-roll the GM's reply after seeing it)</label>
         <div class="actions"><button class="primary" data-act="saveEdit">Save campaign</button></div>
       </div>
       <div class="actions">
@@ -388,7 +390,7 @@ async function loadCampaigns() {
     const slug = card.dataset.slug, msg = card.querySelector("[data-msg]");
     card.querySelector("[data-act=edit]").onclick = () => card.querySelector(".edit").classList.toggle("hidden");
     card.querySelector("[data-act=saveEdit]").onclick = async () => {
-      const body = {}; card.querySelectorAll(".edit [data-f]").forEach(i => body[i.dataset.f] = i.value);
+      const body = {}; card.querySelectorAll(".edit [data-f]").forEach(i => body[i.dataset.f] = i.type === "checkbox" ? i.checked : i.value);
       try { await api(`/api/admin/campaigns/${slug}`, { method: "PATCH", body: JSON.stringify(body) }); loadCampaigns(); }
       catch (e) { msg.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
     };

@@ -154,6 +154,16 @@ class Vault:
             raise KeyError(slug)
         return c
 
+    def trash(self, campaign: Campaign) -> Path:
+        """Move a campaign folder to <vault>/trash/ (recoverable) instead of deleting it."""
+        import shutil
+
+        trash = self.root / "trash"
+        trash.mkdir(exist_ok=True)
+        dest = trash / f"{campaign.slug}-{time.strftime('%Y%m%d-%H%M%S')}"
+        shutil.move(str(campaign.root), dest)
+        return dest
+
     def create(self, name: str, premise: str = "", system: str = "", dm_instructions: str = "") -> Campaign:
         slug = slugify(name)
         root = self.root / "campaigns" / slug
