@@ -109,6 +109,8 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
 .sheet a { color: var(--accent); cursor: pointer; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+.histnav { display: inline-flex; gap: 6px; align-items: center; }
+.histnav button { padding: 4px 9px; }
 label.check input { width: auto; }
 </style>
 </head>
@@ -237,10 +239,11 @@ async function showList() {
 
 // ---- new campaign ----------------------------------------------------------
 const OTHER = "__other__";
-let NEW = { seed: "", avoid: [] };
+// Premise suggestions for the campaign being set up: `history` holds every suggestion (with any
+// edits made to it), `at` is the one showing. Kept across closing the panel; cleared on create.
+let NEW = { seed: "", history: [], at: -1 };
 
 function openNewCampaign() {
-  NEW = { seed: "", avoid: [] };
   $("modal").innerHTML = `<div class="sheet ui">
     <div class="sheethead"><strong>New campaign</strong><button id="nClose">✕</button></div>
     <label>Name</label><input id="nName" placeholder="Traveller: The Spinward Run">
@@ -254,6 +257,7 @@ function openNewCampaign() {
     <div class="row-actions">
       <button id="nSuggest">✨ Suggest premise</button>
       <button id="nAnother" disabled>↻ Try another</button>
+      <span class="histnav"><button id="nPrev" title="Previous suggestion">◀</button><span id="nPos" class="muted small"></span><button id="nNext" title="Next suggestion">▶</button></span>
       <span id="nPremiseMsg" class="muted small"></span>
     </div>
     <label>Extra GM instructions <span class="muted">(optional)</span></label>
@@ -272,11 +276,16 @@ function openNewCampaign() {
   $("nSystemPick").onchange = systemChanged;
   $("nSuggest").onclick = () => suggestPremise(true);
   $("nAnother").onclick = () => suggestPremise(false);
+  $("nPrev").onclick = () => showSuggestion(NEW.at - 1);
+  $("nNext").onclick = () => showSuggestion(NEW.at + 1);
+  if (NEW.at >= 0) $("nPremise").value = NEW.history[NEW.at];
+  updateHistNav();
   $("create").onclick = async () => {
     const name = $("nName").value.trim(); if (!name) return $("nName").focus();
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
       name, system: chosenSystem(), premise: $("nPremise").value, dm_instructions: $("nExtra").value,
       allow_rewind: $("nRewind").checked }) });
+    NEW = { seed: "", history: [], at: -1 };
     close(); openCampaign(slug);
   };
 }
@@ -312,19 +321,42 @@ function chosenSystem() {
 // "Suggest" builds on whatever is typed (blank = a fresh idea); "Try another" keeps that same
 // starting point and asks for something different from the earlier suggestions.
 async function suggestPremise(fresh) {
-  if (fresh) NEW = { seed: $("nPremise").value.trim(), avoid: [] };
-  const btns = [$("nSuggest"), $("nAnother")];
-  btns.forEach(b => b.disabled = true);
+  saveCurrentEdit();
+  if (fresh) {
+    // a new starting point: whatever is typed now, unless it's just a suggestion being shown
+    const typed = $("nPremise").value.trim();
+    NEW.seed = NEW.history.includes(typed) ? NEW.seed : typed;
+  }
+  [$("nSuggest"), $("nAnother"), $("nPrev"), $("nNext")].forEach(b => b.disabled = true);
   $("nPremiseMsg").textContent = "The GM is thinking up a premise…";
   try {
     const r = await api("/api/suggest/premise", { method: "POST", body: JSON.stringify({
-      system: chosenSystem(), seed: NEW.seed, avoid: NEW.avoid }) });
-    $("nPremise").value = r.premise;
-    NEW.avoid.push(r.premise);
+      system: chosenSystem(), seed: NEW.seed, avoid: NEW.history }) });
+    NEW.history.push(r.premise);
+    showSuggestion(NEW.history.length - 1);
     $("nPremiseMsg").textContent = NEW.seed ? "Built on your idea. Edit it freely." : "Edit it freely, or try another.";
   } catch (e) { $("nPremiseMsg").textContent = "Couldn't get a suggestion: " + e.message; }
   $("nSuggest").disabled = false;
-  $("nAnother").disabled = !NEW.avoid.length;
+  updateHistNav();
+}
+
+function saveCurrentEdit() {
+  if (NEW.at >= 0 && $("nPremise")) NEW.history[NEW.at] = $("nPremise").value;
+}
+function showSuggestion(i) {
+  if (i < 0 || i >= NEW.history.length) return;
+  saveCurrentEdit();
+  NEW.at = i;
+  $("nPremise").value = NEW.history[i];
+  updateHistNav();
+}
+function updateHistNav() {
+  const n = NEW.history.length;
+  $("nPrev").parentElement.classList.toggle("hidden", n < 2);
+  $("nPrev").disabled = NEW.at <= 0;
+  $("nNext").disabled = NEW.at >= n - 1;
+  $("nPos").textContent = n ? `${NEW.at + 1} / ${n}` : "";
+  $("nAnother").disabled = !n;
 }
 
 // ---- chat ----------------------------------------------------------------
