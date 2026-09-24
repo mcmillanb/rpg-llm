@@ -32,6 +32,10 @@ ROUTER_SYSTEM = """\
 You are the archivist for a solo role-playing campaign run by an AI game master. You keep the
 campaign wiki and decide what the game master needs to remember. You never write story.
 
+# Campaign brief (the game master always has this)
+
+{brief}
+
 # Campaign wiki index (gazetteer)
 
 {gazetteer}
@@ -57,26 +61,46 @@ NOT a new scene:
   cargo bay)
 - the player announcing or planning a move that the GM's reply has not yet carried out, or
   that the GM's reply blocks or delays (the characters are still where they were)
+- places that are only mentioned, described, pointed at, or visible (an NPC describing a pickup
+  point, a sign on a door across the room): the characters are not there
 - a flashback, or the player asking a question
+
+The campaign brief describes things as of the last filed scene and may be out of date; judge
+from the exchanges below.
 
 Current scene location: {location}
 
 Recent exchanges (oldest first):
 {recent}
 
-Return JSON: transition (bool), confidence (0-1, how sure you are of your answer), reason (one
-sentence), new_location (where the characters are now, if it changed, else null),
-scene_title (3-6 word title describing what happened in the scene that is ENDING, or null if no
-transition), location_now (where the characters are at the end of the latest GM reply, or null
-if unknown)."""
+Return JSON:
+- movement_quote: the exact words from the LATEST GM reply that narrate the player character
+  travelling to or arriving at a different place, or narrate a time skip. "none" if there are
+  no such words (an NPC talking about a place, or a place being visible, is not movement).
+- location_now: where the player character is physically standing at the end of the LATEST GM
+  reply (or null if unknown). Use the same name as the current scene location if they have not
+  moved to a different place.
+- reason: one sentence comparing location_now with the current scene location (and noting any
+  time skip)
+- transition: true only if movement_quote is not "none" AND (location_now is a different place
+  from the current scene location, or there was a significant time skip)
+- confidence: 0-1, how sure you are of your answer
+- new_location: location_now if transition, else null
+- scene_title: 3-6 word title describing what happened in the scene that is ENDING, or null if
+  no transition"""
 
 GATEKEEP_TASK = """\
-Task: the player is about to send the message below. Pick the wiki notes and filed scenes the
-game master needs in order to answer it well. Include a note when the message (or the latest GM
-reply) refers to a person, place, deal, object, or past event that appears in the wiki, even
-indirectly ("the planet where we lost the cargo", "that broker", "the favour we're owed").
-Pick nothing when the message only concerns what is already happening in the current scene.
-Pick at most 4 notes and 2 scenes.
+Task: decide whether the game master needs anything from the archive to answer the player's
+next message. The game master already has the campaign brief and the whole current scene.
+
+Most messages need NOTHING. Return empty lists unless the player's message refers to a
+specific person, place, deal, object, or event from an EARLIER scene whose details are not
+already in the brief or the latest GM reply. Indirect references count ("the planet where we
+lost the cargo", "that skinny broker", "the loan shark back home"). Do not pick notes just
+because they are about the same topic, setting, or ship; do not pick anything for actions that
+only involve what is happening right now.
+
+At most 3 notes and 1 scene.
 
 Latest GM reply (truncated):
 {last_reply}
@@ -84,8 +108,8 @@ Latest GM reply (truncated):
 Player message:
 {message}
 
-Return JSON: notes (list of wiki paths from the index), scenes (list of scene ids), reason
-(one sentence)."""
+Return JSON: reason (one sentence, written first), notes (list of wiki paths from the index),
+scenes (list of scene ids)."""
 
 AUDIT_TASK = """\
 Task: an earlier pass decided that a new scene began at the exchange marked >>> below. With

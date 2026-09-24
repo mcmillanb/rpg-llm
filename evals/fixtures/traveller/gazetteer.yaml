@@ -1,0 +1,63 @@
+- name: Ruie Highport Bar
+  aliases: []
+  type: location
+  path: locations/ruie-highport-bar.md
+  summary: 'A dockside bar in the Marches, smelling of burnt coffee and engine grease.
+    It is half-full with dockhands and pilots. A black sedan was parked outside during
+    the scene. The bartender is a thick-armed '
+- name: Pell
+  aliases:
+  - Independent logistics
+  type: npc
+  path: npcs/pell.md
+  summary: A gaunt man in a threadbare grey coat. He is an independent logistics broker
+    who knows of Venn's debt to Oskar Brandt. He is currently leaving the Ruie Highport
+    Bar.
+- name: Oskar Brandt
+  aliases:
+  - Brandt
+  type: npc
+  path: npcs/oskar-brandt.md
+  summary: A Ruie loan shark. Venn owes him 40,000 credits. He is aware of Venn's
+    financial situation and has a hostile relationship with Pell.
+- name: Wandering Star
+  aliases: []
+  type: thing
+  path: things/wandering-star.md
+  summary: A battered free trader. Currently in the Efate system with 60% fuel and
+    an empty hold.
+- name: Varo Station
+  aliases: []
+  type: thing
+  path: things/varo-station.md
+  summary: A space station. The intended destination for the 50,000-credit job offered
+    by Pell.
+- name: Kessel
+  aliases: []
+  type: thing
+  path: things/kessel.md
+  summary: A location on the trade route between Ruie and Varo Station.
+- name: Regina
+  aliases: []
+  type: thing
+  path: things/regina.md
+  summary: A location mentioned by Venn. It is not in the Wandering Star's nav plot
+    and its coordinates are unknown to the crew.
+- name: Efate
+  aliases: []
+  type: location
+  path: locations/efate.md
+  summary: A star system with a green-gold star and a planet described as looking
+    like a bruise. The system has thin traffic and no visible Ruie or Brandt presence.
+- name: Dex
+  aliases: []
+  type: npc
+  path: npcs/dex.md
+  summary: Engineer of the Wandering Star. Currently in the engine deck of the Wandering
+    Star in the Efate system.
+- name: Mira Sato
+  aliases: []
+  type: npc
+  path: npcs/mira-sato.md
+  summary: Pilot of the Wandering Star. Currently in the cockpit of the Wandering
+    Star in the Efate system.

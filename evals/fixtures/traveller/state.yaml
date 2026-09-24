@@ -1,0 +1,25 @@
+scenes:
+- id: 1
+  start: 1
+  status: compacted
+  location: Ruie Highport Bar
+  title: The Grey Coat Broker
+  note: scenes/001-the-grey-coat-broker.md
+- id: 2
+  start: 9
+  status: compacted
+  location: Efate
+  title: Departure for Efate
+  confidence: 0.98
+  audited: true
+  note: scenes/002-departure-for-efate.md
+- id: 3
+  start: 15
+  status: open
+  location: Efate startown freight brokers' hall
+  confidence: 0.98
+  reason: The GM's reply describes arrival at Efate's startown and entry into the
+    freight brokers' hall, a new location distinct from the previous scene.
+  audited: true
+fold: null
+tracked_until: null

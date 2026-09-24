@@ -14,29 +14,30 @@ from rpg_llm.vault import Campaign, Scene, State, estimate_tokens
 
 log = logging.getLogger(__name__)
 
-TRACK_SCHEMA = {
+TRACK_SCHEMA = {  # location first: naming where they are before judging makes it more reliable
     "type": "object",
     "properties": {
+        "movement_quote": {"type": "string"},
+        "location_now": {"type": ["string", "null"]},
+        "reason": {"type": "string"},
         "transition": {"type": "boolean"},
         "confidence": {"type": "number"},
-        "reason": {"type": "string"},
         "new_location": {"type": ["string", "null"]},
         "scene_title": {"type": ["string", "null"]},
-        "location_now": {"type": ["string", "null"]},
     },
-    "required": ["transition", "confidence", "reason", "new_location", "scene_title",
-                 "location_now"],
+    "required": ["movement_quote", "location_now", "reason", "transition", "confidence", "new_location",
+                 "scene_title"],
     "additionalProperties": False,
 }
 
-GATE_SCHEMA = {
+GATE_SCHEMA = {  # reason first so the model decides before it lists
     "type": "object",
     "properties": {
+        "reason": {"type": "string"},
         "notes": {"type": "array", "items": {"type": "string"}},
         "scenes": {"type": "array", "items": {"type": "integer"}},
-        "reason": {"type": "string"},
     },
-    "required": ["notes", "scenes", "reason"],
+    "required": ["reason", "notes", "scenes"],
     "additionalProperties": False,
 }
 
@@ -56,6 +57,7 @@ NOTES_TOKEN_CAP = 2000
 
 def router_system(campaign: Campaign, state: State) -> str:
     return prompts.ROUTER_SYSTEM.format(
+        brief=campaign.brief.strip() or "(empty)",
         gazetteer=wiki.gazetteer_text(campaign.gazetteer()),
         scenes=wiki.scenes_text(campaign, state),
     )
@@ -169,8 +171,9 @@ async def gatekeep(campaign: Campaign, router: LLMClient | None, message: str,
     if not gazetteer:
         return None, info
 
-    # names in the GM's last reply are already in context; the router still sees that reply
-    paths = [e["path"] for e in wiki.mentioned(gazetteer, message)]
+    # names in the GM's last reply are already in play, so matching them adds nothing
+    in_play = {e["path"] for e in wiki.mentioned(gazetteer, last_reply)}
+    paths = [e["path"] for e in wiki.mentioned(gazetteer, message) if e["path"] not in in_play]
     info["alias_hits"] = list(paths)
     scene_ids: list[int] = []
     if router is not None:
@@ -182,9 +185,9 @@ async def gatekeep(campaign: Campaign, router: LLMClient | None, message: str,
                 GATE_SCHEMA, max_tokens=300), timeout)
             info["router"] = pick
             known = {e["path"] for e in gazetteer}
-            paths += [p for p in pick.get("notes", []) if p in known and p not in paths]
+            paths += [p for p in pick.get("notes", [])[:3] if p in known and p not in paths]
             filed = {s.id for s in state.scenes if s.status == "compacted"}
-            scene_ids = [i for i in pick.get("scenes", []) if i in filed][:2]
+            scene_ids = [i for i in pick.get("scenes", []) if i in filed][:1]
         except (TimeoutError, Exception) as e:  # never block play on the router
             info["router"] = f"skipped: {type(e).__name__}"
             log.warning("gatekeeper router call failed: %r", e)

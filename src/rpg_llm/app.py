@@ -141,6 +141,9 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     convo = context.build(c, state, messages, notes)
     tools = {"tools": wiki.TOOLS} if c.gazetteer() else {}  # nothing to look up yet
     content, reasoning, trace = "", "", []
+    stats = {"prompt_tokens": 0, "cached_tokens": 0, "prompt_ms": 0, "completion_tokens": 0,
+             "rounds": 0}
+    t_dm = time.time()
     yield sse({"type": "status", "text": ""})
     for _ in range(MAX_TOOL_ROUNDS):
         calls = None
@@ -154,6 +157,10 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                 yield sse({"type": "content", "text": d["content"]})
             elif "tool_calls" in d:
                 calls = d["tool_calls"]
+            elif "usage" in d:
+                stats["rounds"] += 1
+                for k in ("prompt_tokens", "cached_tokens", "prompt_ms", "completion_tokens"):
+                    stats[k] += d["usage"].get(k) or 0
         content += round_content
         if not calls:
             break
@@ -167,7 +174,10 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
             yield sse({"type": "tool", "name": tc["name"], "arguments": tc["arguments"]})
             convo.append({"role": "tool", "tool_call_id": tc["id"] or f"call_{i}", "content": result})
 
-    entry = {"role": "assistant", "content": content.strip(), "reasoning": reasoning.strip()}
+    stats["seconds"] = round(time.time() - t_dm, 1)
+    log.info("DM turn %s: %s", c.slug, stats)
+    entry = {"role": "assistant", "content": content.strip(), "reasoning": reasoning.strip(),
+             "stats": stats}
     if trace:
         entry["tools"] = trace
     if supersedes:

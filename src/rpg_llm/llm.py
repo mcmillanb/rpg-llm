@@ -31,13 +31,25 @@ class LLMClient:
         return resp.choices[0].message.model_dump(exclude_none=True)
 
     async def stream(self, messages: list[dict], **kwargs: Any) -> AsyncIterator[dict]:
-        """Streams deltas as dicts: {"reasoning": str}, {"content": str}, and finally
+        """Streams deltas as dicts: {"reasoning": str}, {"content": str}, then
+        {"usage": {...}} (prompt/cached tokens, prefill ms where the server reports them) and
         {"tool_calls": [...]} if the model asked for tools (arguments fully assembled)."""
         stream = await self._client.chat.completions.create(
-            model=self.slot.model, messages=messages, stream=True, **kwargs
+            model=self.slot.model, messages=messages, stream=True,
+            stream_options={"include_usage": True}, **kwargs
         )
         calls: dict[int, dict] = {}
         async for chunk in stream:
+            if chunk.usage:
+                details = chunk.usage.prompt_tokens_details
+                timings = (chunk.model_extra or {}).get("timings") or {}
+                yield {"usage": {
+                    "prompt_tokens": chunk.usage.prompt_tokens,
+                    "cached_tokens": (details.cached_tokens if details else None)
+                    or timings.get("cache_n") or 0,
+                    "prompt_ms": round(timings.get("prompt_ms", 0)),
+                    "completion_tokens": chunk.usage.completion_tokens,
+                }}
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -63,7 +75,7 @@ class LLMClient:
             response_format={"type": "json_schema",
                              "json_schema": {"name": "result", "strict": True, "schema": schema}},
             max_tokens=max_tokens,
-            temperature=0.2,
+            temperature=0,  # routing decisions should be repeatable
             extra_body=NO_THINKING,
         )
         return parse_json(msg.get("content") or "")

@@ -99,7 +99,7 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
   <header>
     <button id="back" class="hidden" title="Campaigns">←</button>
     <h1 id="title">RPG LLM</h1>
-    <button id="themeBtn" title="Theme">◐</button>
+    <button id="themeBtn" title="Light / dark">☾</button>
     <button id="archiveBtn" class="hidden">Archive</button>
   </header>
   <main id="main"><div class="wrap" id="view"></div></main>
@@ -237,10 +237,14 @@ function sceneFor(id) {
 function msgHTML(m, isLastUser, isLastGm) {
   if (m.role === "user") {
     return `<div class="msg user" data-id="${m.id}">${md(m.content)}
-      ${isLastUser && !S.busy ? `<div class="meta actions"><button data-act="edit">Edit</button></div>` : ""}</div>`;
+      ${isLastUser && !S.busy ? `<div class="meta actions"><button data-act="edit">Edit</button>${S.data.messages[S.data.messages.length - 1] === m ? ` <button data-act="retry">↻ Retry</button>` : ""}</div>` : ""}</div>`;
   }
   const chips = [];
   if (m.injected?.length) chips.push(`<span class="chip" title="${esc(m.injected.join(", "))}">📜 ${m.injected.length} from archive</span>`);
+  if (m.stats?.prompt_tokens) {
+    const st = m.stats, pct = Math.round(100 * st.cached_tokens / st.prompt_tokens);
+    chips.push(`<span class="chip" title="prompt ${st.prompt_tokens} tokens, ${st.cached_tokens} from cache, prefill ${(st.prompt_ms / 1000).toFixed(1)}s, reply ${st.completion_tokens} tokens in ${st.seconds}s">⚡ ${(st.prompt_tokens / 1000).toFixed(1)}k ctx · ${pct}% cached</span>`);
+  }
   if (m.tools?.length) chips.push(`<span class="chip" title="${esc(m.tools.map(t => t.tool + " " + t.arguments).join("\n"))}">🔎 ${m.tools.length} lookup${m.tools.length > 1 ? "s" : ""}</span>`);
   return `<div class="msg assistant" data-id="${m.id}">
     ${m.reasoning ? `<details class="think"><summary>thinking</summary><div>${esc(m.reasoning)}</div></details>` : ""}
@@ -272,6 +276,7 @@ function renderChat(scroll) {
   $("view").innerHTML = html;
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
+  $("view").querySelectorAll("[data-act=retry]").forEach(b => b.onclick = () => runTurn(`/api/campaigns/${S.slug}/regenerate`, null));
   $("view").querySelectorAll("[data-act=edit]").forEach(b => b.onclick = () => editLast(lastUser));
   if (scroll) $("main").scrollTop = $("main").scrollHeight;
 }
