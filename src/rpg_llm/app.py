@@ -12,8 +12,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import compactor, context, router, wiki
-from rpg_llm.config import Settings
+from rpg_llm import admin, compactor, context, router, wiki
+from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
 
@@ -28,12 +28,32 @@ class Runtime:
     def __init__(self, settings: Settings, dm=None, router_llm=None, archiver=None):
         self.settings = settings
         self.vault = Vault(settings.vault_path)
-        self.dm = dm or LLMClient(settings.dm)
-        self.router = router_llm or LLMClient(settings.router)
-        self.archiver = archiver or LLMClient(settings.archiver)
+        self._fixed = {"dm": dm, "router": router_llm, "archiver": archiver}  # tests inject fakes
         self.locks: dict[str, asyncio.Lock] = {}
         self.status: dict[str, dict] = {}
+        self.jobs: dict[str, dict] = {}  # admin jobs: imports, wiki rebuilds
         self.tasks: set[asyncio.Task] = set()
+        self.reload()
+
+    def reload(self) -> None:
+        """(Re)create the model clients from the current config, e.g. after an admin save.
+        A role that isn't set up yet gets None."""
+        for role in ROLES:
+            client = self._fixed[role]
+            if client is None:
+                try:
+                    client = LLMClient(self.settings.app.slot(role))
+                except NotConfigured:
+                    client = None
+            setattr(self, role, client)
+
+    @property
+    def configured(self) -> bool:
+        return all(getattr(self, role) is not None for role in ROLES)
+
+    def require_configured(self) -> None:
+        if not self.configured:
+            raise HTTPException(503, "Not set up yet: open /admin to add your model servers.")
 
     def lock(self, slug: str) -> asyncio.Lock:
         return self.locks.setdefault(slug, asyncio.Lock())
@@ -61,7 +81,7 @@ class Runtime:
         st["tracking"] = True
         try:
             async with self.lock(c.slug):
-                v = await router.track(c, self.router, self.settings.router_threshold)
+                v = await router.track(c, self.router, self.settings.tuning.router_threshold)
             if v is not None:
                 st["last_verdict"] = {**v, "at": time.time()}
         except Exception as e:
@@ -92,13 +112,16 @@ class Runtime:
 
     def maybe_compact_idle(self, c: Campaign) -> None:
         last = c.last_activity()
-        idle = last is not None and time.time() - last > self.settings.idle_compact_hours * 3600
+        hours = self.settings.tuning.idle_compact_hours
+        idle = last is not None and time.time() - last > hours * 3600
         if idle and not self.st(c.slug)["compacting"] and self.needs_compaction(c):
             self.spawn(self.run_compact(c))
 
     async def idle_loop(self) -> None:
         while True:
             await asyncio.sleep(300)
+            if not self.configured:
+                continue
             for c in self.vault.campaigns():
                 try:
                     self.maybe_compact_idle(c)
@@ -121,10 +144,10 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     last_reply = next((m["content"] for m in reversed(messages[:-1]) if m["role"] == "assistant"), "")
 
     yield sse({"type": "status", "text": "checking the archive…"})
-    gate_router = rt.router if rt.settings.gatekeeper_enabled else None
+    gate_router = rt.router if rt.settings.tuning.gatekeeper_enabled else None
     t0 = time.time()
     notes, info = await router.gatekeep(c, gate_router, user["content"], last_reply,
-                                        rt.settings.gatekeeper_timeout)
+                                        rt.settings.tuning.gatekeeper_timeout)
     info["seconds"] = round(time.time() - t0, 1)
     info["notes"] = notes
     st["last_context"] = info
@@ -132,7 +155,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
 
     state = c.load_state()
     window = await rt.dm.context_window() or 32768
-    budget = int(window * rt.settings.live_tail_pct / 100)
+    budget = int(window * rt.settings.tuning.live_tail_pct / 100)
     if context.tail_tokens(c, state, messages) > budget:
         yield sse({"type": "status", "text": "condensing the start of this scene…"})
         await compactor.fold_current_scene(c, rt.archiver, budget // 2, rt.lock(c.slug))
@@ -140,7 +163,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
 
     convo = context.build(c, state, messages, notes)
     kwargs = {"tools": wiki.TOOLS} if c.gazetteer() else {}  # nothing to look up yet
-    if not rt.settings.dm_thinking:
+    if not rt.settings.app.dm.thinking:
         kwargs["extra_body"] = NO_THINKING
     content, reasoning, trace = "", "", []
     stats = {"prompt_tokens": 0, "cached_tokens": 0, "prompt_ms": 0, "completion_tokens": 0,
@@ -221,7 +244,7 @@ class Say(BaseModel):
 def create_app(rt: Runtime | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.rt = app.state.rt if hasattr(app.state, "rt") else Runtime(Settings())
+        app.state.rt = app.state.rt if hasattr(app.state, "rt") else Runtime(Settings.load())
         idle = asyncio.create_task(app.state.rt.idle_loop())
         yield
         idle.cancel()
@@ -237,6 +260,16 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     def index():
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/admin")
+    def admin_page():
+        return FileResponse(STATIC / "admin.html")
+
+    @app.get("/api/status")
+    async def status():
+        rt = R()
+        return {"configured": rt.configured, "missing": rt.settings.app.missing(),
+                "warnings": rt.settings.app.warnings()}
+
     @app.get("/api/campaigns")
     async def list_campaigns():
         return [{"slug": c.slug, "name": c.meta.get("name"), "system": c.meta.get("system"),
@@ -251,7 +284,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def get_campaign(slug: str):
         rt = R()
         c = rt.campaign(slug)
-        rt.maybe_compact_idle(c)  # resuming after a long gap files the old scenes
+        if rt.configured:
+            rt.maybe_compact_idle(c)  # resuming after a long gap files the old scenes
         state = c.load_state()
         return {"slug": c.slug, "meta": c.meta, "messages": c.messages(),
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
@@ -278,6 +312,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns/{slug}/chat")
     async def chat(slug: str, body: Say):
         rt = R()
+        rt.require_configured()
         c = rt.campaign(slug)
         if not body.content.strip():
             raise HTTPException(400, "empty message")
@@ -287,6 +322,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns/{slug}/regenerate")
     async def regenerate(slug: str):
         rt = R()
+        rt.require_configured()
         c = rt.campaign(slug)
         msgs = c.messages()
         if not msgs:
@@ -302,6 +338,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns/{slug}/edit")
     async def edit_last(slug: str, body: Say):
         rt = R()
+        rt.require_configured()
         c = rt.campaign(slug)
         msgs = c.messages()
         last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
@@ -315,12 +352,14 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns/{slug}/compact")
     async def compact_now(slug: str):
         rt = R()
+        rt.require_configured()
         c = rt.campaign(slug)
         report = await rt.run_compact(c)
         if report is None:
             raise HTTPException(409, "compaction already running")
         return report
 
+    admin.register(app, R)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app
 
@@ -329,5 +368,8 @@ def main() -> None:
     import uvicorn
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    s = Settings()
-    uvicorn.run(create_app(Runtime(s)), host=s.host, port=s.port)
+    s = Settings.load()
+    if not s.app.configured:
+        log.warning("Not set up yet: open http://<this host>:%s/admin to configure models.",
+                    s.env.port)
+    uvicorn.run(create_app(Runtime(s)), host=s.env.host, port=s.env.port)

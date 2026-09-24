@@ -100,6 +100,7 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
     <button id="back" class="hidden" title="Campaigns">←</button>
     <h1 id="title">RPG LLM</h1>
     <button id="themeBtn" title="Light / dark">☾</button>
+    <a href="/admin" title="Settings"><button>⚙</button></a>
     <button id="archiveBtn" class="hidden">Archive</button>
   </header>
   <main id="main"><div class="wrap" id="view"></div></main>
@@ -424,8 +425,14 @@ $("send").onclick = send;
 $("back").onclick = showList;
 $("archiveBtn").onclick = openDrawer;
 $("closeDrawer").onclick = () => $("drawer").classList.remove("open");
-const q = new URLSearchParams(location.search).get("c");
-q ? openCampaign(q).catch(showList) : showList();
+(async () => {
+  try {
+    const st = await api("/api/status");
+    if (!st.configured) { location.href = "/admin"; return; }  // first run: set up models first
+  } catch {}
+  const q = new URLSearchParams(location.search).get("c");
+  q ? openCampaign(q).catch(showList) : showList();
+})();
 </script>
 </body>
 </html>

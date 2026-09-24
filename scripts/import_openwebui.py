@@ -27,11 +27,11 @@ async def process(s: Settings, campaign, file_scenes: bool) -> None:
     t = time.time()
 
     def progress(n, total, v):
-        mark = "NEW SCENE" if v.get("transition") and v.get("confidence", 0) >= s.router_threshold else ""
+        mark = "NEW SCENE" if v.get("transition") and v.get("confidence", 0) >= s.tuning.router_threshold else ""
         print(f"  [{n}/{total}] {time.time() - t:6.0f}s {mark} {v.get('new_location') or ''}", flush=True)
 
     print("Segmenting into scenes…")
-    opened = await router.backfill(campaign, router_llm, s.router_threshold, progress)
+    opened = await router.backfill(campaign, router_llm, s.tuning.router_threshold, progress)
     print(f"  {opened} scene boundaries found")
     if file_scenes:
         print("Filing closed scenes into the wiki (the last scene stays live)…")
@@ -50,7 +50,7 @@ def main() -> None:
     ap.add_argument("--resume", metavar="SLUG")
     a = ap.parse_args()
     logging.basicConfig(level=logging.WARNING)
-    s = Settings()
+    s = Settings.load()
     vault = Vault(s.vault_path)
 
     if a.resume:

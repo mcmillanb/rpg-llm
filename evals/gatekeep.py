@@ -24,7 +24,7 @@ CASES = [
 
 
 async def main() -> None:
-    s = Settings()
+    s = Settings.load()
     c = fixture_campaign("traveller")
     llm = LLMClient(s.router)
     last = c.messages()[-1]["content"]

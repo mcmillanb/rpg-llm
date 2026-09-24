@@ -20,64 +20,61 @@ shows a ⚡ chip with the context size and cache hit rate.
 
 Design: [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md), [`docs/MILESTONE_1_PLAN.md`](docs/MILESTONE_1_PLAN.md).
 
-## Models
-
-Any OpenAI-compatible chat completions endpoint works (llama.cpp, LM Studio, LiteLLM, vLLM,
-OpenAI, …). There are three model settings; the router and archiver fall back to the DM's if left
-unset:
-
-| Setting    | Does                                               | Tested with                        |
-|------------|----------------------------------------------------|------------------------------------|
-| `DM_*`     | runs the game                                      | `qwen3.8-27b` on llama.cpp         |
-| `ROUTER_*` | per-turn wiki lookup + scene tracking (fast)       | `qwen/qwen3-vl-8b` on LM Studio    |
-| `ARCHIVER_*` | writing the wiki between sessions (quality)      | same as DM                         |
-
-The DM server needs tool calling (llama.cpp: `--jinja`). The router and archiver need JSON
-schema output (`response_format`), which llama.cpp and LM Studio both support.
-
 ## Run
 
 ```bash
-cp .env.example .env        # then set DM_BASE_URL / DM_MODEL (and ROUTER_* if you have one)
-uv run python scripts/smoke.py   # checks each model: context window, a reply, a tool call
-uv run rpg-llm              # http://localhost:8700
+uv run rpg-llm              # then open http://localhost:8700
 ```
 
-Or with Docker (the vault stays on the host in `./vault`, owned by your user):
+or with Docker (the vault stays on the host in `./vault`, owned by your user):
 
 ```bash
 docker compose up -d --build
 ```
 
-## Settings (`.env`)
+There is no config file to write. The first visit goes to the **admin page** (`/admin`, also
+the ⚙ button):
 
-| Variable | Default | |
+1. **Add a connection** for each model server: any OpenAI-compatible endpoint (llama.cpp,
+   LM Studio, Ollama, vLLM, LiteLLM, OpenAI…). It lists the server's models straight away. Add
+   one per server, e.g. one llama.cpp instance per GPU on different ports. Tick "loads one model
+   at a time" for LM Studio-style servers; it's ticked for you when LM Studio is detected.
+2. **Pick a model for each job** from the combined list:
+
+   | Job | Does | Suggested |
+   |---|---|---|
+   | Game master | runs the game; needs tool calling (llama.cpp: `--jinja`) | your best model; ~64k context per slot |
+   | Router | per-turn recall + scene tracking; needs JSON-schema output | small and fast, e.g. Qwen3-8B; 16–32k context |
+   | Archiver | writes the wiki between sessions | "same as the game master" |
+
+   **Test** checks each one: context window, a reply, tool calling or JSON output.
+3. **Save**, then play.
+
+Settings live in `<vault>/config.yaml` (owner-only permissions, since it can hold API keys), so
+they travel with the vault and survive container rebuilds. Only three optional environment
+variables exist: `VAULT_PATH` (default `./vault`), `HOST` (`0.0.0.0`), `PORT` (`8700`).
+
+The admin page also has the tuning values, an optional admin password, campaign management
+(edit, file closed scenes now, rebuild the wiki, delete to trash) and the Open WebUI import.
+
+| Tuning | Default | |
 |---|---|---|
-| `DM_BASE_URL`, `DM_MODEL`, `DM_API_KEY` | | the GM model |
-| `ROUTER_…`, `ARCHIVER_…` | DM's values | same fields per model |
-| `*_CONTEXT_WINDOW` | detected | override if the server doesn't report it |
-| `DM_THINKING` | true | false skips Qwen's reasoning: replies start ~5–10 s sooner, possibly less considered |
-| `VAULT_PATH` | `./vault` | campaign folders live in `VAULT_PATH/campaigns/` |
-| `LIVE_TAIL_PCT` | 50 | share of the GM's context window the live tail may use before the oldest part of the current scene is condensed |
-| `ROUTER_THRESHOLD` | 0.7 | confidence needed to call a scene change |
-| `GATEKEEPER_ENABLED` | true | router call before each turn (turn off for paid APIs; name matching still runs) |
-| `GATEKEEPER_TIMEOUT` | 30 | seconds before the turn goes ahead without it |
-| `IDLE_COMPACT_HOURS` | 6 | idle time before closed scenes are filed |
+| Live context budget | 50% | share of the GM's context window the current stretch of play may use before its oldest part is condensed |
+| Scene-change threshold | 0.7 | router confidence needed to call a scene change |
+| Idle hours before filing | 6 | finished scenes are filed after this long without play |
+| Recall before every turn | on | the router's per-turn check (name matching still runs when off) |
+| Recall timeout | 30 s | the turn goes ahead without it after this |
 
 ## Importing an Open WebUI chat
 
-Export from Open WebUI (a single chat's "Export chat (.json)", or Settings → Chats → Export),
-stop the server, then:
+In the admin page, choose the export file (a chat's "Export chat (.json)", or Settings → Chats →
+Export), pick the chat, give it a premise (your character, crew, ship, situation; it helps the
+archiver get names right) and import. It follows the branch that was on screen, splits the
+history into scenes with the router (about 5 seconds per exchange), then files everything but
+the last scene. It runs in the background with progress shown on the page.
 
-```bash
-uv run python scripts/import_openwebui.py export.json \
-    --system "Traveller (Mongoose 2e), Third Imperium" --premise-file premise.md
-```
-
-The importer follows the branch that was on screen, keeps Qwen's thinking separate, splits the
-history into scenes with the router (about 5 seconds per exchange), then files everything but the
-last scene. A premise file (your character, crew, ship, situation) helps the archiver get names
-right. If it's interrupted, pick up again with `--resume <campaign-slug>`.
+The same is available from the command line (`scripts/import_openwebui.py --help`), which can
+resume an interrupted import.
 
 ## The vault
 
@@ -93,13 +90,13 @@ vault/campaigns/<campaign>/
 ```
 
 Open `vault/` (or a campaign folder) in Obsidian to browse it. To rebuild a campaign's wiki
-from its transcript after changing prompts or models: `uv run python scripts/rebuild_wiki.py
-<campaign>` (server stopped).
+from its transcript after changing prompts or models, use "Rebuild wiki" in the admin page.
 
 ## Development
 
 ```bash
 uv run pytest               # unit tests, fake models, no GPU needed
+uv run python scripts/smoke.py    # checks the configured models from the command line
 uv run python evals/track.py      # router prompt evals against the real models
 uv run python evals/gatekeep.py
 ```

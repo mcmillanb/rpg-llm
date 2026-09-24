@@ -35,18 +35,18 @@ async def run(name: str, labels: str, s: Settings, llm: LLMClient) -> int:
         v = await router._verdict(c, llm, state, msgs, i)
         if n == 0:
             v = {**v, "transition": False}  # as in track(): the opening exchange only sets location
-        got = v["transition"] and v["confidence"] >= s.router_threshold
+        got = v["transition"] and v["confidence"] >= s.tuning.router_threshold
         exp = labels[n] == "y"
         ok += got == exp
         print(f"{'ok ' if got == exp else 'BAD'} ex{n + 1:<2} expect={'Y' if exp else 'n'} "
               f"got={'Y' if got else 'n'} {v['confidence']:.2f} {time.time() - t:4.1f}s "
               f"now={v.get('location_now')!r} | {v['reason'][:90]}")
-        router._apply(state, v, msgs[i]["id"], s.router_threshold)
+        router._apply(state, v, msgs[i]["id"], s.tuning.router_threshold)
     return ok
 
 
 async def main() -> None:
-    s = Settings()
+    s = Settings.load()
     llm = LLMClient(s.router)
     total = ok = 0
     for name, labels in FIXTURES.items():

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from rpg_llm import compactor, context, router, wiki
 from rpg_llm.app import Runtime, create_app
-from rpg_llm.config import Settings
+from rpg_llm.config import AppConfig, Env, Settings, Tuning
 from rpg_llm.vault import Scene, State, Vault
 
 
@@ -193,7 +193,7 @@ def sse_events(resp):
 
 
 def test_chat_turn_streams_runs_tools_and_logs(tmp_path):
-    settings = Settings(_env_file=None, vault_path=tmp_path, gatekeeper_enabled=False)
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
     dm = FakeLLM(stream_rounds=[
         [{"reasoning": "hmm"}, {"tool_calls": [{"id": "1", "name": "lookup",
                                                 "arguments": '{"name": "Pell"}'}]}],
@@ -219,7 +219,7 @@ def test_chat_turn_streams_runs_tools_and_logs(tmp_path):
 
 
 def test_regenerate_replaces_last_reply(tmp_path):
-    settings = Settings(_env_file=None, vault_path=tmp_path, gatekeeper_enabled=False)
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
     dm = FakeLLM(stream_rounds=[[{"content": "first"}], [{"content": "second"}]])
     rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2),
                  archiver=FakeLLM())
@@ -308,7 +308,7 @@ def test_same_place_by_name_containment():
 
 
 def test_edit_last_message_replaces_exchange(tmp_path):
-    settings = Settings(_env_file=None, vault_path=tmp_path, gatekeeper_enabled=False)
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
     dm = FakeLLM(stream_rounds=[[{"content": "You go left."}], [{"content": "You go right."}]])
     rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2),
                  archiver=FakeLLM())
@@ -327,3 +327,52 @@ def test_bracketed_and_the_prefixed_names_match_existing_entry():
     assert wiki.find(gz, "Quantum Flux Modulator Core", "item") is gz[0]
     assert wiki.find(gz, "the quantum flux modulator core", "item") is gz[0]
     assert wiki.normalise_kind("settlement") == "location"
+
+
+# ---- admin ------------------------------------------------------------------
+
+def form(**over):
+    body = {"servers": [{"id": "a", "name": "A", "base_url": "http://a/v1", "api_key": "secret-key"}],
+            "dm": {"server": "a", "model": "big"}, "router": {}, "archiver": {},
+            "tuning": {}}
+    body.update(over)
+    return body
+
+
+def test_first_run_blocks_play_until_admin_setup(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()))
+    with TestClient(create_app(rt)) as client:
+        assert client.get("/api/status").json()["configured"] is False
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        assert client.post(f"/api/campaigns/{slug}/chat", json={"content": "hi"}).status_code == 503
+
+        cfg = client.put("/api/admin/config", json=form()).json()
+        assert cfg["servers"][0]["api_key"].startswith("••••") and cfg["servers"][0]["api_key"].endswith("-key")
+        assert client.get("/api/status").json()["configured"] is True
+        assert rt.dm is not None and rt.dm.slot.model == "big"
+        # saving again with the masked key keeps the real one
+        client.put("/api/admin/config", json=form(servers=cfg["servers"]))
+        assert rt.settings.app.servers[0].api_key == "secret-key"
+        assert (tmp_path / "config.yaml").exists()
+
+
+def test_admin_password_locks_admin_api(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()))
+    with TestClient(create_app(rt)) as client:
+        client.put("/api/admin/config", json=form(new_password="pw"))  # this browser stays in
+        assert client.get("/api/admin/config").status_code == 200
+        client.post("/api/admin/logout")
+        client.cookies.clear()
+        assert client.get("/api/admin/config").status_code == 401
+        assert client.post("/api/admin/login", json={"password": "nope"}).status_code == 401
+        assert client.post("/api/admin/login", json={"password": "pw"}).status_code == 200
+        assert client.get("/api/admin/config").status_code == 200
+
+
+def test_delete_moves_campaign_to_trash(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()))
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "Old game"}).json()["slug"]
+        assert client.delete(f"/api/admin/campaigns/{slug}").status_code == 200
+        assert client.get("/api/campaigns").json() == []
+        assert len(list((tmp_path / "trash").iterdir())) == 1

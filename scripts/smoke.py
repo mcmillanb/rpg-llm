@@ -40,7 +40,7 @@ async def check(name: str, llm: LLMClient) -> None:
 
 
 async def main() -> None:
-    s = Settings()
+    s = Settings.load()
     seen = set()
     for name, slot in [("dm", s.dm), ("router", s.router), ("archiver", s.archiver)]:
         if slot in seen:

@@ -17,7 +17,7 @@ from rpg_llm.vault import Vault
 
 
 async def main(slug: str) -> None:
-    s = Settings()
+    s = Settings.load()
     c = Vault(s.vault_path).get(slug)
     compactor.reset_wiki(c)
     report = await compactor.compact(c, LLMClient(s.router), LLMClient(s.archiver), asyncio.Lock())

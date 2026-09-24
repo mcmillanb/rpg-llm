@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RPG LLM Admin</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+<style>
+:root {
+  --bg: #f6f4ef; --panel: #ffffff; --ink: #1d1b18; --muted: #6d675e; --line: #e2ddd3;
+  --accent: #9a4a12; --accent-ink: #fff; --ok: #2f7a3a; --warn: #a33; --soft: #fbf3e8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e4dc; --muted: #9a958c; --line: #2d3136;
+    --accent: #e0914d; --accent-ink: #1a1208; --ok: #7cc68a; --warn: #f07a7a; --soft: #2a241c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --panel: #1d2024; --ink: #e8e4dc; --muted: #9a958c; --line: #2d3136;
+  --accent: #e0914d; --accent-ink: #1a1208; --ok: #7cc68a; --warn: #f07a7a; --soft: #2a241c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--panel);
+  border-radius: 8px; padding: 6px 12px; font-size: 14px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.danger { color: var(--warn); }
+button:disabled { opacity: .5; cursor: default; }
+input, textarea, select { width: 100%; padding: 7px 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); }
+input[type=checkbox] { width: auto; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 3px; }
+label.inline { display: flex; gap: 8px; align-items: center; color: var(--ink); font-size: 14px; }
+header { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0; flex: 1; }
+header a { color: var(--accent); text-decoration: none; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 16px 16px 100px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+  margin: 28px 0 8px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 10px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.row3 { display: grid; grid-template-columns: 2fr 1fr; gap: 0 12px; }
+@media (max-width: 620px) { .row, .row3 { grid-template-columns: 1fr; } }
+.muted { color: var(--muted); font-size: 13px; }
+.ok { color: var(--ok); } .bad { color: var(--warn); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.banner { background: var(--soft); border: 1px solid var(--accent); border-radius: 12px;
+  padding: 12px 16px; margin: 16px 0; }
+.banner ul { margin: 6px 0 0; padding-left: 20px; }
+.result { font-size: 13px; margin-top: 8px; white-space: pre-wrap; }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
+  border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  display: flex; gap: 10px; align-items: center; justify-content: center; z-index: 5; }
+.savebar span { font-size: 13px; }
+.hidden { display: none !important; }
+.stats { font-size: 13px; color: var(--muted); }
+.job { font-size: 13px; padding: 8px 0; border-top: 1px solid var(--line); }
+.job:first-child { border-top: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RPG LLM · Admin</h1>
+  <a href="/" id="playLink">Play →</a>
+  <button id="logout" class="hidden">Log out</button>
+</header>
+
+<div class="wrap">
+  <div id="login" class="card hidden">
+    <strong>Admin login</strong>
+    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+    <div class="actions"><button class="primary" id="loginBtn">Log in</button><span id="loginMsg" class="bad"></span></div>
+  </div>
+
+  <div id="main" class="hidden">
+    <div id="setup" class="banner hidden"></div>
+    <div id="warnings" class="banner hidden"></div>
+
+    <h2>Connections</h2>
+    <p class="muted">Any OpenAI-compatible server: llama.cpp, LM Studio, Ollama, vLLM, LiteLLM, OpenAI…
+      Each connection lists the models it offers. Add one per server, e.g. one llama.cpp instance per GPU.</p>
+    <div id="servers"></div>
+    <button id="addServer">+ Add connection</button>
+
+    <h2>Models</h2>
+    <p class="muted">Pick which model does each job. The router runs every turn and should be small and fast;
+      the archiver writes the wiki between sessions and benefits from the bigger model.</p>
+    <div id="roles"></div>
+
+    <h2>Tuning</h2>
+    <div class="card">
+      <div class="row">
+        <div><label>Live context budget (% of the GM's context window)</label><input id="t_live_tail_pct" type="number" min="5" max="95" step="5">
+          <div class="muted">When the current scene alone passes this, its oldest part is condensed.</div></div>
+        <div><label>Scene-change confidence threshold (0–1)</label><input id="t_router_threshold" type="number" min="0" max="1" step="0.05">
+          <div class="muted">Higher: fewer, surer scene breaks.</div></div>
+        <div><label>File finished scenes after this many idle hours</label><input id="t_idle_compact_hours" type="number" min="0" step="0.5"></div>
+        <div><label>Archive check timeout before each turn (seconds)</label><input id="t_gatekeeper_timeout" type="number" min="1" step="1"></div>
+      </div>
+      <label class="inline" style="margin-top:14px"><input type="checkbox" id="t_gatekeeper_enabled">
+        Ask the router what to recall before every turn (catches indirect references; turn off to save calls on paid APIs)</label>
+    </div>
+
+    <h2>Admin password</h2>
+    <div class="card">
+      <div class="muted" id="pwState"></div>
+      <div class="row">
+        <div><label>New password</label><input id="newPw" type="password" autocomplete="new-password"></div>
+        <div style="align-self:end"><label class="inline"><input type="checkbox" id="clearPw"> Remove the password</label></div>
+      </div>
+      <div class="muted" style="margin-top:6px">Protects this admin page. Playing stays open to anyone who can reach the server, so keep it on your own network.</div>
+    </div>
+
+    <h2>Campaigns</h2>
+    <div id="campaigns"></div>
+
+    <h2>Import from Open WebUI</h2>
+    <div class="card">
+      <div class="muted">In Open WebUI, use a chat's menu → Download → Export chat (.json), or Settings → Chats → Export.
+        The import splits the history into scenes (≈5 s per exchange) and files all but the last one into the wiki (≈40 s per scene).</div>
+      <label>Export file</label><input id="impFile" type="file" accept=".json,application/json">
+      <div id="impForm" class="hidden">
+        <label>Chat</label><select id="impChat"></select>
+        <div class="row">
+          <div><label>Campaign name</label><input id="impName"></div>
+          <div><label>Game system / setting</label><input id="impSystem" placeholder="Traveller, story-first"></div>
+        </div>
+        <label>Premise: your character, crew, world, how it started (helps the archiver get names right)</label>
+        <textarea id="impPremise" rows="5"></textarea>
+        <div class="actions"><button class="primary" id="impGo">Import</button></div>
+      </div>
+      <div id="impMsg" class="result"></div>
+    </div>
+    <div id="jobs" class="card hidden"></div>
+  </div>
+</div>
+
+<div class="savebar hidden" id="savebar">
+  <span id="saveMsg" class="muted"></span>
+  <button class="primary" id="save">Save settings</button>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ROLES = [
+  ["dm", "Game master", "Runs the game. Needs tool calling (llama.cpp: --jinja). Recommended context: ~64k per slot."],
+  ["router", "Router", "Runs before and after every turn: scene tracking and what to recall. Small and fast (e.g. an 8B). ~16–32k context."],
+  ["archiver", "Archiver", "Writes scene notes, the wiki and the brief between sessions. Quality matters more than speed."],
+];
+let CFG = null;           // config as loaded / edited
+let MODELS = {};          // server id -> probe result
+let dirty = false;
+
+(function () { let t = null; try { t = localStorage.getItem("theme"); } catch {} if (t) document.documentElement.dataset.theme = t; })();
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: opts.body instanceof FormData ? {} : { "Content-Type": "application/json" }, ...opts });
+  if (r.status === 401) { showLogin(); throw new Error("login required"); }
+  const text = await r.text();
+  let data; try { data = JSON.parse(text); } catch { data = text; }
+  if (!r.ok) throw new Error(data?.detail || text || r.statusText);
+  return data;
+}
+function markDirty() { dirty = true; $("saveMsg").textContent = "Unsaved changes"; }
+
+// ---- login -----------------------------------------------------------------
+function showLogin() { $("login").classList.remove("hidden"); $("main").classList.add("hidden"); $("savebar").classList.add("hidden"); $("pw").focus(); }
+$("loginBtn").onclick = async () => {
+  try { await api("/api/admin/login", { method: "POST", body: JSON.stringify({ password: $("pw").value }) }); $("login").classList.add("hidden"); load(); }
+  catch (e) { $("loginMsg").textContent = e.message; }
+};
+$("pw").addEventListener("keydown", e => { if (e.key === "Enter") $("loginBtn").click(); });
+$("logout").onclick = async () => { await api("/api/admin/logout", { method: "POST" }); location.reload(); };
+
+// ---- load ------------------------------------------------------------------
+async function load() {
+  CFG = await api("/api/admin/config");
+  $("main").classList.remove("hidden"); $("savebar").classList.remove("hidden");
+  $("logout").classList.toggle("hidden", !CFG.has_password);
+  renderBanners(); renderServers(); renderRoles(); renderTuning(); renderPassword();
+  await Promise.all(CFG.servers.map(s => probe(s)));
+  loadCampaigns(); loadJobs();
+  dirty = false; $("saveMsg").textContent = "";
+}
+
+function renderBanners() {
+  const m = CFG.missing || [];
+  $("setup").classList.toggle("hidden", !m.length);
+  $("setup").innerHTML = `<strong>Welcome! A few things to set up before you can play:</strong><ul>${m.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+    <div class="muted" style="margin-top:6px">Add a connection below; its models appear in the pickers under “Models”. Then save.</div>`;
+  const w = CFG.warnings || [];
+  $("warnings").classList.toggle("hidden", !w.length);
+  $("warnings").innerHTML = w.map(x => `⚠ ${esc(x)}`).join("<br>");
+  $("playLink").classList.toggle("hidden", m.length > 0);
+}
+
+// ---- connections -----------------------------------------------------------
+function newId() { return "c" + Math.random().toString(36).slice(2, 8); }
+
+function renderServers() {
+  $("servers").innerHTML = CFG.servers.map((s, i) => `
+    <div class="card" data-i="${i}">
+      <div class="row3">
+        <div><label>Name</label><input data-f="name" value="${esc(s.name)}" placeholder="GPU 1 (llama.cpp)"></div>
+        <div><label>API key (optional)</label><input data-f="api_key" type="password" value="${esc(s.api_key)}" autocomplete="off"></div>
+      </div>
+      <label>URL</label><input data-f="base_url" value="${esc(s.base_url)}" placeholder="http://192.168.1.10:8080/v1">
+      <label class="inline" style="margin-top:10px"><input type="checkbox" data-f="one_model_at_a_time" ${s.one_model_at_a_time ? "checked" : ""}>
+        Loads one model at a time (LM Studio, Ollama with one slot): warn if two jobs would make it swap</label>
+      <div class="result" data-probe>${probeText(s.id)}</div>
+      <div class="actions"><button data-act="probe">Refresh models</button><button data-act="remove" class="danger">Remove</button></div>
+    </div>`).join("") || `<p class="muted">No connections yet.</p>`;
+  $("servers").querySelectorAll(".card").forEach(card => {
+    const s = CFG.servers[+card.dataset.i];
+    card.querySelectorAll("[data-f]").forEach(inp => {
+      inp.addEventListener(inp.type === "checkbox" ? "change" : "input", () => {
+        s[inp.dataset.f] = inp.type === "checkbox" ? inp.checked : inp.value; markDirty();
+        if (inp.dataset.f === "name") renderRoles();
+      });
+      if (inp.dataset.f === "base_url" || inp.dataset.f === "api_key") inp.addEventListener("change", () => probe(s));
+    });
+    card.querySelector("[data-act=probe]").onclick = () => probe(s);
+    card.querySelector("[data-act=remove]").onclick = () => {
+      if (!confirm(`Remove ${s.name || s.base_url}?`)) return;
+      CFG.servers.splice(+card.dataset.i, 1); delete MODELS[s.id]; markDirty(); renderServers(); renderRoles();
+    };
+  });
+}
+
+function probeText(id) {
+  const p = MODELS[id];
+  if (!p) return "";
+  if (p.loading) return `<span class="muted">Checking…</span>`;
+  if (!p.ok) return `<span class="bad">✗ ${esc(p.error)}</span>`;
+  const list = p.models.map(m => `${esc(m.id)}${m.context ? ` <span class="muted">(${Math.round(m.context / 1024)}k ctx${m.state ? ", " + esc(m.state) : ""})</span>` : m.state ? ` <span class="muted">(${esc(m.state)})</span>` : ""}`).join(", ");
+  return `<span class="ok">✓</span> ${p.kind ? esc(p.kind) + " · " : ""}${p.models.length} model${p.models.length === 1 ? "" : "s"}: ${list || "none"}`;
+}
+
+async function probe(s) {
+  if (!s.base_url) return;
+  MODELS[s.id] = { loading: true }; refreshProbe(s);
+  try {
+    const r = await api("/api/admin/probe", { method: "POST", body: JSON.stringify({ base_url: s.base_url, api_key: s.api_key, server_id: s.id }) });
+    if (r.ok && r.base_url && r.base_url !== s.base_url.replace(/\/+$/, "")) { s.base_url = r.base_url; markDirty(); renderServers(); }
+    if (r.ok && r.kind === "LM Studio" && !s.one_model_at_a_time) { s.one_model_at_a_time = true; markDirty(); renderServers(); }
+    MODELS[s.id] = r;
+  } catch (e) { MODELS[s.id] = { ok: false, error: e.message }; }
+  refreshProbe(s); renderRoles();
+}
+function refreshProbe(s) {
+  const i = CFG.servers.indexOf(s);
+  const el = $("servers").querySelector(`.card[data-i="${i}"] [data-probe]`);
+  if (el) el.innerHTML = probeText(s.id);
+}
+
+$("addServer").onclick = () => {
+  CFG.servers.push({ id: newId(), name: "", base_url: "", api_key: "", one_model_at_a_time: false });
+  markDirty(); renderServers();
+  $("servers").querySelector(".card:last-child input[data-f=base_url]").focus();
+};
+
+// ---- roles -----------------------------------------------------------------
+function modelOptions(role) {
+  const r = CFG[role];
+  const opts = [];
+  if (role !== "dm") opts.push(`<option value="" ${r.server ? "" : "selected"}>Same as the game master</option>`);
+  else opts.push(`<option value="" ${r.server ? "" : "selected"} disabled>Choose a model…</option>`);
+  let found = false;
+  for (const s of CFG.servers) {
+    const p = MODELS[s.id];
+    const models = p?.ok ? p.models.map(m => m.id) : [];
+    if (r.server === s.id && r.model && !models.includes(r.model)) models.unshift(r.model); // saved, server offline
+    for (const m of models) {
+      const sel = r.server === s.id && r.model === m;
+      found ||= sel;
+      const ctx = p?.ok ? p.models.find(x => x.id === m)?.context : null;
+      opts.push(`<option value="${esc(s.id)}::${esc(m)}" ${sel ? "selected" : ""}>${esc(m)} · ${esc(s.name || s.base_url)}${ctx ? ` (${Math.round(ctx / 1024)}k)` : ""}</option>`);
+    }
+  }
+  return opts.join("");
+}
+
+function renderRoles() {
+  $("roles").innerHTML = ROLES.map(([role, title, help]) => {
+    const r = CFG[role];
+    return `<div class="card" data-role="${role}">
+      <strong>${title}</strong><div class="muted">${help}</div>
+      <div class="row3">
+        <div><label>Model</label><select data-f="model">${modelOptions(role)}</select></div>
+        <div><label>Context window override</label><input data-f="context_window" type="number" min="1024" step="1024" placeholder="auto-detect" value="${r.context_window ?? ""}"></div>
+      </div>
+      ${role === "dm" ? `<label class="inline" style="margin-top:10px"><input type="checkbox" data-f="thinking" ${r.thinking !== false ? "checked" : ""}> Let the model think before replying (Qwen-style reasoning; off = faster replies)</label>` : ""}
+      <div class="actions"><button data-act="test">Test</button></div>
+      <div class="result" data-result></div>
+    </div>`;
+  }).join("");
+  $("roles").querySelectorAll(".card").forEach(card => {
+    const role = card.dataset.role, r = CFG[role];
+    card.querySelector("[data-f=model]").onchange = (e) => {
+      const [server, ...rest] = e.target.value.split("::");
+      r.server = server || null; r.model = server ? rest.join("::") : null; markDirty();
+    };
+    card.querySelector("[data-f=context_window]").oninput = (e) => { r.context_window = e.target.value ? +e.target.value : null; markDirty(); };
+    const th = card.querySelector("[data-f=thinking]");
+    if (th) th.onchange = () => { r.thinking = th.checked; markDirty(); };
+    card.querySelector("[data-act=test]").onclick = async (e) => {
+      const out = card.querySelector("[data-result]");
+      e.target.disabled = true; out.innerHTML = `<span class="muted">Testing… (a cold model can take a minute)</span>`;
+      try {
+        const t = await api(`/api/admin/test/${role}`, { method: "POST", body: JSON.stringify(formBody()) });
+        out.innerHTML = t.error ? `<span class="bad">✗ ${esc(t.error)}</span>` : [
+          `${t.ok ? '<span class="ok">✓ works</span>' : '<span class="bad">✗ problem</span>'} · ${esc(t.model)}`,
+          `context window: ${t.context_window ? t.context_window.toLocaleString() + " tokens" : "not reported (set an override)"}`,
+          `reply: “${esc(t.reply)}” in ${t.reply_seconds}s${t.thinks ? " (with thinking)" : ""}`,
+          "tool_calling" in t ? `tool calling: ${t.tool_calling ? "yes" : '<span class="bad">no</span>'}` : `JSON output: ${t.json_output ? `yes (${t.json_seconds}s)` : '<span class="bad">no</span>'}`,
+          t.note ? `<span class="bad">${esc(t.note)}</span>` : "",
+        ].filter(Boolean).join("<br>");
+      } catch (err) { out.innerHTML = `<span class="bad">✗ ${esc(err.message)}</span>`; }
+      e.target.disabled = false;
+    };
+  });
+}
+
+// ---- tuning / password -------------------------------------------------------
+const TUNE = ["live_tail_pct", "router_threshold", "idle_compact_hours", "gatekeeper_timeout"];
+function renderTuning() {
+  for (const k of TUNE) { $("t_" + k).value = CFG.tuning[k]; $("t_" + k).oninput = (e) => { CFG.tuning[k] = +e.target.value; markDirty(); }; }
+  $("t_gatekeeper_enabled").checked = CFG.tuning.gatekeeper_enabled;
+  $("t_gatekeeper_enabled").onchange = (e) => { CFG.tuning.gatekeeper_enabled = e.target.checked; markDirty(); };
+}
+function renderPassword() {
+  $("pwState").textContent = CFG.has_password ? "A password is set." : "No password set: anyone who can reach this page can change settings.";
+  $("newPw").value = ""; $("clearPw").checked = false;
+  $("newPw").oninput = markDirty; $("clearPw").onchange = markDirty;
+  $("clearPw").parentElement.classList.toggle("hidden", !CFG.has_password);
+}
+
+function formBody() {
+  return { servers: CFG.servers, dm: CFG.dm, router: CFG.router, archiver: CFG.archiver, tuning: CFG.tuning,
+           new_password: $("newPw").value || null, clear_password: $("clearPw").checked };
+}
+
+$("save").onclick = async () => {
+  $("save").disabled = true;
+  try {
+    const cfg = await api("/api/admin/config", { method: "PUT", body: JSON.stringify(formBody()) });
+    const models = MODELS; CFG = cfg; MODELS = models;
+    renderBanners(); renderServers(); renderRoles(); renderPassword();
+    $("logout").classList.toggle("hidden", !CFG.has_password);
+    dirty = false;
+    $("saveMsg").innerHTML = CFG.missing.length ? `<span class="bad">Saved, but not ready yet: ${esc(CFG.missing.join("; "))}</span>` : `<span class="ok">Saved ✓</span> <a href="/">Go play →</a>`;
+  } catch (e) { $("saveMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  $("save").disabled = false;
+};
+window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+// ---- campaigns ---------------------------------------------------------------
+async function loadCampaigns() {
+  const list = await api("/api/admin/campaigns");
+  $("campaigns").innerHTML = list.map(c => `
+    <div class="card" data-slug="${esc(c.slug)}">
+      <strong>${esc(c.name)}</strong> <span class="muted">${esc(c.system)}</span>
+      <div class="stats">${c.messages} messages · ${c.scenes} scenes (${c.filed} filed) · ${c.wiki_entries} wiki entries
+        ${c.last_activity ? " · last played " + new Date(c.last_activity * 1000).toLocaleString() : ""}${c.busy ? " · <strong>filing…</strong>" : ""}</div>
+      <div class="edit hidden">
+        <div class="row"><div><label>Name</label><input data-f="name" value="${esc(c.name)}"></div>
+          <div><label>Game system / setting</label><input data-f="system" value="${esc(c.system)}"></div></div>
+        <label>Premise</label><textarea data-f="premise" rows="4">${esc(c.premise)}</textarea>
+        <label>Extra GM instructions</label><textarea data-f="dm_instructions" rows="3">${esc(c.dm_instructions)}</textarea>
+        <div class="actions"><button class="primary" data-act="saveEdit">Save campaign</button></div>
+      </div>
+      <div class="actions">
+        <a href="/?c=${encodeURIComponent(c.slug)}"><button>Play</button></a>
+        <button data-act="edit">Edit</button>
+        <button data-act="compact" ${c.busy ? "disabled" : ""} title="Normally automatic after the idle time">File closed scenes now</button>
+        <button data-act="rebuild" ${c.busy ? "disabled" : ""} title="Throw the wiki away and rewrite it from the transcript">Rebuild wiki</button>
+        <button data-act="delete" class="danger" ${c.busy ? "disabled" : ""}>Delete</button>
+      </div>
+      <div class="result" data-msg></div>
+    </div>`).join("") || `<p class="muted">No campaigns yet: create one from the Play page, or import one below.</p>`;
+  $("campaigns").querySelectorAll(".card").forEach(card => {
+    const slug = card.dataset.slug, msg = card.querySelector("[data-msg]");
+    card.querySelector("[data-act=edit]").onclick = () => card.querySelector(".edit").classList.toggle("hidden");
+    card.querySelector("[data-act=saveEdit]").onclick = async () => {
+      const body = {}; card.querySelectorAll(".edit [data-f]").forEach(i => body[i.dataset.f] = i.value);
+      try { await api(`/api/admin/campaigns/${slug}`, { method: "PATCH", body: JSON.stringify(body) }); loadCampaigns(); }
+      catch (e) { msg.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+    };
+    card.querySelector("[data-act=compact]").onclick = async (e) => {
+      e.target.disabled = true; msg.textContent = "Filing… (about 40 s per scene)";
+      try { const r = await api(`/api/campaigns/${slug}/compact`, { method: "POST" }); msg.innerHTML = `<span class="ok">Filed ${r.filed.length} scene(s) in ${r.seconds}s.</span>`; }
+      catch (err) { msg.innerHTML = `<span class="bad">${esc(err.message)}</span>`; }
+      loadCampaigns();
+    };
+    card.querySelector("[data-act=rebuild]").onclick = async () => {
+      if (!confirm("Rebuild the whole wiki from the transcript? Scene boundaries are kept; notes, index, timeline and brief are rewritten. About 40 s per scene.")) return;
+      try { await api(`/api/admin/campaigns/${slug}/rebuild`, { method: "POST" }); loadCampaigns(); loadJobs(); }
+      catch (e) { msg.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+    };
+    card.querySelector("[data-act=delete]").onclick = async () => {
+      if (!confirm("Delete this campaign? It is moved to the vault's trash folder, not erased.")) return;
+      try { const r = await api(`/api/admin/campaigns/${slug}`, { method: "DELETE" }); alert("Moved to " + r.moved_to); loadCampaigns(); }
+      catch (e) { msg.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+    };
+  });
+}
+
+// ---- import ------------------------------------------------------------------
+let upload = null;
+$("impFile").onchange = async () => {
+  const f = $("impFile").files[0]; if (!f) return;
+  $("impMsg").textContent = "Reading…"; $("impForm").classList.add("hidden");
+  const fd = new FormData(); fd.append("file", f);
+  try {
+    upload = await api("/api/admin/import/inspect", { method: "POST", body: fd });
+    $("impChat").innerHTML = upload.chats.map(c => `<option value="${c.index}">${esc(c.title)} · ${c.messages} messages${c.first ? " · " + new Date(c.first * 1000).toLocaleDateString() + "–" + new Date(c.last * 1000).toLocaleDateString() : ""}</option>`).join("");
+    $("impChat").onchange = () => { $("impName").value = upload.chats[+$("impChat").value].title; };
+    $("impChat").onchange();
+    $("impForm").classList.remove("hidden"); $("impMsg").textContent = "";
+  } catch (e) { $("impMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+};
+$("impGo").onclick = async () => {
+  $("impGo").disabled = true;
+  try {
+    await api("/api/admin/import", { method: "POST", body: JSON.stringify({ token: upload.token, chat: +$("impChat").value,
+      name: $("impName").value, system: $("impSystem").value, premise: $("impPremise").value }) });
+    $("impForm").classList.add("hidden"); $("impFile").value = "";
+    $("impMsg").innerHTML = `<span class="ok">Import started: progress below. You can leave this page; it keeps going.</span>`;
+    loadCampaigns(); loadJobs();
+  } catch (e) { $("impMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  $("impGo").disabled = false;
+};
+
+let jobTimer = null;
+async function loadJobs() {
+  const jobs = await api("/api/admin/jobs");
+  $("jobs").classList.toggle("hidden", !jobs.length);
+  $("jobs").innerHTML = `<strong>Background jobs</strong>` + jobs.map(j => `<div class="job">
+    <strong>${esc(j.title)}</strong> · ${j.state === "running" ? esc(j.progress) : j.state === "done" ? `<span class="ok">done</span> ${esc(JSON.stringify(j.result))}` : `<span class="bad">failed: ${esc(j.error)}</span>`}
+    <span class="muted"> · started ${new Date(j.started * 1000).toLocaleTimeString()}</span></div>`).join("");
+  clearTimeout(jobTimer);
+  if (jobs.some(j => j.state === "running")) jobTimer = setTimeout(() => { loadJobs(); }, 3000);
+  else if (jobs.length) loadCampaigns();
+}
+
+load().catch(() => {});
+</script>
+</body>
+</html>

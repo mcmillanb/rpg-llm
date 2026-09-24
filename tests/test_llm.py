@@ -2,7 +2,7 @@ import json
 
 import httpx2
 
-from rpg_llm.config import ModelSlot, Settings
+from rpg_llm.config import AppConfig, ModelSlot, Role, Server, load_config, save_config
 from rpg_llm.llm import LLMClient
 
 
@@ -63,14 +63,42 @@ async def test_context_window_override_skips_server():
     assert await llm.context_window() == 32768
 
 
-def test_router_and_archiver_fall_back_to_dm(monkeypatch):
-    s = Settings(_env_file=None, dm_base_url="http://box/v1", dm_model="big", dm_api_key="k")
-    assert s.router == s.dm
-    assert s.archiver == s.dm
+def config(**roles):
+    return AppConfig(servers=[Server(id="box", base_url="http://box/v1", api_key="k"),
+                              Server(id="other", base_url="http://other/v1")], **roles)
 
 
-def test_router_on_other_server_does_not_inherit_dm_key():
-    s = Settings(_env_file=None, dm_base_url="http://box/v1", dm_model="big", dm_api_key="secret",
-                 router_base_url="http://other/v1", router_model="small")
-    assert s.router.api_key == "none"
-    assert s.router.model == "small"
+def test_router_and_archiver_fall_back_to_dm():
+    c = config(dm=Role(server="box", model="big"))
+    assert c.configured
+    assert c.slot("router") == c.slot("dm") == ModelSlot("http://box/v1", "big", "k")
+    assert c.slot("archiver") == c.slot("dm")
+
+
+def test_each_role_uses_its_own_server_and_key():
+    c = config(dm=Role(server="box", model="big"), router=Role(server="other", model="small"))
+    assert c.slot("router") == ModelSlot("http://other/v1", "small", "none")
+
+
+def test_unconfigured_reports_what_is_missing():
+    assert AppConfig().missing() == ["add a model server", "choose the DM model"]
+    c = config(dm=Role(server="box", model="big"), router=Role(server="gone", model="x"))
+    assert not c.configured and "router" in c.missing()[0]
+
+
+def test_one_model_at_a_time_server_warns_when_roles_would_swap():
+    c = AppConfig(servers=[Server(id="lm", base_url="http://lm/v1", one_model_at_a_time=True)],
+                  dm=Role(server="lm", model="big"), router=Role(server="lm", model="small"))
+    assert c.warnings() and "swapping" in c.warnings()[0]
+    c.router = Role()  # same as DM: no swapping
+    assert not c.warnings()
+
+
+def test_password_and_config_round_trip(tmp_path):
+    c = config(dm=Role(server="box", model="big"))
+    c.set_password("hunter2")
+    save_config(tmp_path, c)
+    loaded = load_config(tmp_path)
+    assert loaded.check_password("hunter2") and not loaded.check_password("nope")
+    assert loaded.admin_token() == c.admin_token()
+    assert (tmp_path / "config.yaml").stat().st_mode & 0o077 == 0  # API keys: owner-only

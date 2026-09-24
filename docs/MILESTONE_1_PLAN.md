@@ -32,7 +32,10 @@ Two processes share one vault:
 - **Wiki tools:** OpenAI function-calling tools that the app runs itself. They're written so an MCP
   wrapper can be added later.
 
-## Config (`.env`)
+## Config
+
+> Superseded: configuration is now done in the admin page and stored in
+> `<vault>/config.yaml`, with connections (servers) separate from roles. See the README.
 
 Three model slots, each with a base URL, API key and model name:
 

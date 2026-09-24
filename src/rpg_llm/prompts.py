@@ -157,7 +157,9 @@ Return JSON:
 - others: other named places, ships, vehicles, organisations, or important items that are
   likely to matter again later, each {{name, aliases, kind, visit, current_state}}. Leave out
   ordinary parts, tools and supplies (wiring, motors, lenses): mention them in the summary instead.
-  Every named person goes in npcs, never here.
+  Every named person goes in npcs, never here. "kind" is one of: location (any place: planet,
+  settlement, building, bar, shop, outpost, site, station), npc (a person), ship (a starship),
+  vehicle (a ground or air vehicle), organisation (a group, company, network or project), item.
 
 Only give an NPC or other entity its own entry if it has a proper name ("Oskar Brandt", "the
 Wandering Star"). Unnamed minor characters (a bartender, a guard) are only mentioned inside the
