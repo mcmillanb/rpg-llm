@@ -18,7 +18,8 @@ Two processes share one vault:
 ## Stack
 
 - **Backend:** Python 3.12, FastAPI, managed with `uv`. Models are called through the `openai` SDK
-  pointed at any OpenAI-compatible `base_url` (LiteLLM for now).
+  pointed at any OpenAI-compatible `base_url`: llama.cpp, LiteLLM, OpenAI, Anthropic's compatible
+  endpoint and so on. The app is a standalone container that runs no models itself.
 - **Frontend:** plain HTML/JS served by FastAPI, mobile-friendly, no build step. The DM reply
   streams over SSE. Qwen's thinking output is shown collapsed.
 - **Storage:** plain files in the vault (markdown, YAML and JSONL). No database. The vault path
@@ -33,14 +34,14 @@ Three model slots, each with a base URL, API key and model name:
 
 | Slot       | Job                                                 | Default                |
 |------------|-----------------------------------------------------|------------------------|
-| `DM`       | the adventure                                       | Qwen 3.6 27B (LiteLLM) |
-| `ROUTER`   | per-turn gatekeeper + scene tracking (small, fast)  | Qwen3 8B               |
+| `DM`       | the adventure                                       | `qwen3.8-27b`          |
+| `ROUTER`   | per-turn gatekeeper + scene tracking (small, fast)  | Qwen3 8B; `DM` until it runs |
 | `ARCHIVER` | compaction: scene logs, wiki notes, campaign brief  | same as `DM`           |
 
 Other settings:
 - `VAULT_PATH`
 - `LIVE_TAIL_PCT`: live-tail budget as a percentage of the DM's context window. The window size is
-  read from LiteLLM `/model/info` or llama.cpp `/props`, with a manual override.
+  read from `/v1/models` (llama.cpp `meta.n_ctx`) or `/slots`, with a manual override.
 - `ROUTER_THRESHOLD`: the confidence a scene transition needs before it counts.
 - `GATEKEEPER_ENABLED`: turns off the router call before each turn, e.g. for paid APIs.
 - `IDLE_COMPACT_HOURS`: how long the chat must be idle before compaction runs.
@@ -73,7 +74,9 @@ Notes use `[[wikilinks]]` so the vault opens cleanly in Obsidian.
 ```
 
 The part that changes every turn goes last, so llama.cpp reuses its prompt cache for the rest and
-processes only the new text. This alone should cut most of the current multi-minute replies.
+processes only the new text. Measured on the inference box (2026-09-24): a cold 15k-token prompt
+takes 21.5 s (prefill ~714 tok/s); the same prompt with a new message on the end takes 0.6 s.
+Reprocessing a ~200k-token chat takes about 4.7 min, which accounts for the current waits.
 
 If the current scene alone goes over `LIVE_TAIL_PCT`, the oldest part of that scene is folded
 into an "earlier in this scene" summary. The transcript stays complete.
@@ -119,8 +122,8 @@ rebuilt from it.
 
 ## Build order
 
-1. Scaffold the project, config and LLM client. Smoke test against LiteLLM, including a check that
-   Qwen tool calling works.
+1. Scaffold the project, config and LLM client. Smoke test against the llama.cpp endpoint. (Tool
+   calling was checked by hand on 2026-09-24 and works.)
 2. Vault and transcript modules, plus a plain chat loop in the UI (streamed, thinking collapsed,
    regenerate/edit).
 3. Prompt assembly: stable prefix, brief, live tail, and the live-tail budget.
@@ -136,5 +139,4 @@ Tests use a fake OpenAI-compatible responder so the logic can be checked without
 
 ## Still needed from Billy
 
-- The LiteLLM base URL and the model names for the DM and router slots.
 - The Open WebUI JSON export of the Traveller chat (needed at step 8).
