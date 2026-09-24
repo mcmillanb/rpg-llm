@@ -1,0 +1,15 @@
+services:
+  rpg-llm:
+    build: .
+    image: rpg-llm
+    ports:
+      - "8700:8700"
+    env_file: .env
+    # Write vault files as your host user so Obsidian (and you) can edit them.
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      VAULT_PATH: /vault
+    volumes:
+      # Host folder for the campaign vault (open it in Obsidian). Change the left side freely.
+      - ./vault:/vault
+    restart: unless-stopped

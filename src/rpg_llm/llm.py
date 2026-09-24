@@ -81,16 +81,34 @@ class LLMClient:
         return parse_json(msg.get("content") or "")
 
     async def context_window(self) -> int | None:
-        """Manual override if set, else what the server reports (llama.cpp puts it in
-        `meta.n_ctx` on /v1/models). None if the server doesn't say."""
+        """Manual override if set, else what the server reports: llama.cpp puts it in
+        `meta.n_ctx` on /v1/models, LM Studio in `loaded_context_length` on /api/v0/models.
+        None if the server doesn't say."""
         if self._context_window is None:
-            models = await self._client.models.list()
-            for m in models.data:
-                if m.id == self.slot.model:
-                    meta = (m.model_extra or {}).get("meta") or {}
-                    self._context_window = meta.get("n_ctx")
-                    break
+            try:
+                models = await self._client.models.list()
+                for m in models.data:
+                    if m.id == self.slot.model:
+                        meta = (m.model_extra or {}).get("meta") or {}
+                        self._context_window = meta.get("n_ctx")
+                        break
+            except Exception:
+                pass
+        if self._context_window is None:
+            self._context_window = await self._lmstudio_context()
         return self._context_window
+
+    async def _lmstudio_context(self) -> int | None:
+        root = str(self._client.base_url).rstrip("/").removesuffix("/v1")
+        try:
+            async with httpx2.AsyncClient(timeout=10) as http:
+                r = await http.get(f"{root}/api/v0/models/{self.slot.model}")
+                if r.status_code != 200:
+                    return None
+                d = r.json()
+                return d.get("loaded_context_length") or d.get("max_context_length")
+        except Exception:
+            return None
 
 
 def parse_json(text: str) -> dict:
