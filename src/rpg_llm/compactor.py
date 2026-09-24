@@ -30,6 +30,9 @@ _ENTITY = {
     "additionalProperties": False,
 }
 
+# "others" must say what they are; strict JSON output drops optional fields
+_OTHER = {**_ENTITY, "required": [*_ENTITY["required"], "kind"]}
+
 ARCHIVE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -38,7 +41,7 @@ ARCHIVE_SCHEMA = {
         "timeline": {"type": "string"},
         "location": {"anyOf": [_ENTITY, {"type": "null"}]},
         "npcs": {"type": "array", "items": _ENTITY},
-        "others": {"type": "array", "items": _ENTITY},
+        "others": {"type": "array", "items": _OTHER},
     },
     "required": ["title", "summary", "timeline", "location", "npcs", "others"],
     "additionalProperties": False,
