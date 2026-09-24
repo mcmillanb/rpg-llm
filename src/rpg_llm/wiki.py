@@ -12,7 +12,8 @@ KIND_DIRS = {"location": "locations", "npc": "npcs"}  # anything else goes to "t
 _KIND_ALIASES = {
     "npc": {"npc", "person", "character", "people", "individual", "crew", "contact"},
     "location": {"location", "place", "planet", "world", "system", "station", "city", "town",
-                 "starport", "highport", "downport", "bar", "building", "venue", "moon"},
+                 "starport", "highport", "downport", "bar", "building", "venue", "moon",
+                 "settlement", "outpost", "site", "base", "facility", "shop", "cantina"},
 }
 
 
@@ -21,7 +22,8 @@ def normalise_kind(kind: str | None) -> str:
     for canon, words in _KIND_ALIASES.items():
         if k in words:
             return canon
-    return k if k in ("ship", "organisation", "organization", "item", "faction") else "thing"
+    return k if k in ("ship", "vehicle", "organisation", "organization", "item", "faction") \
+        else "thing"
 
 TOOLS = [
     {"type": "function", "function": {
@@ -53,6 +55,13 @@ def _names(entry: dict) -> list[str]:
     return [n for n in [entry["name"], *(entry.get("aliases") or [])] if n and len(n) >= 3]
 
 
+def _bare(name: str) -> str:
+    """Name without bracketed extras, quotes or a leading "the": "Quantum Core (QC-9)" ->
+    "quantum core"."""
+    n = re.sub(r"\([^)]*\)|[\"'“”‘’]", "", name).strip().lower()
+    return re.sub(r"^the\s+", "", re.sub(r"\s+", " ", n))
+
+
 def mentioned(gazetteer: list[dict], *texts: str) -> list[dict]:
     """Entries whose name or alias appears as a whole phrase in any of the texts."""
     blob = "\n".join(texts)
@@ -70,6 +79,10 @@ def find(gazetteer: list[dict], name: str, kind: str | None = None) -> dict | No
     key = name.strip().lower()
     for e in gazetteer:
         if key in (n.lower() for n in _names(e)):
+            return e
+    bare = _bare(name)
+    for e in gazetteer:
+        if bare and bare in (_bare(n) for n in _names(e)):
             return e
     words = set(re.findall(r"\w+", key))
     if not words or kind != "npc":

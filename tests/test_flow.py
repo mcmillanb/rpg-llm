@@ -319,3 +319,11 @@ def test_edit_last_message_replaces_exchange(tmp_path):
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
         assert [m["content"] for m in msgs] == ["right", "You go right."]
         assert [m["content"] for m in dm.calls[1][1][1:]] == ["right"]
+
+
+def test_bracketed_and_the_prefixed_names_match_existing_entry():
+    gz = [{"name": "Quantum Flux Modulator Core (QFMC-994)", "aliases": [], "type": "item",
+           "path": "things/qfmc.md"}]
+    assert wiki.find(gz, "Quantum Flux Modulator Core", "item") is gz[0]
+    assert wiki.find(gz, "the quantum flux modulator core", "item") is gz[0]
+    assert wiki.normalise_kind("settlement") == "location"

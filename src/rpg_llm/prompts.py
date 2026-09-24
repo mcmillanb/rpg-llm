@@ -154,14 +154,17 @@ Return JSON:
 - location: the main location, as {{name, aliases, kind, visit, current_state}}, or null
 - npcs: named non-player characters who appear or matter, each {{name, aliases, role, visit,
   current_state}}
-- others: other named places, ships, organisations, or items worth their own note, each
-  {{name, aliases, kind, visit, current_state}}
+- others: other named places, ships, vehicles, organisations, or important items that are
+  likely to matter again later, each {{name, aliases, kind, visit, current_state}}. Leave out
+  ordinary parts, tools and supplies (wiring, motors, lenses): mention them in the summary instead.
+  Every named person goes in npcs, never here.
 
 Only give an NPC or other entity its own entry if it has a proper name ("Oskar Brandt", "the
 Wandering Star"). Unnamed minor characters (a bartender, a guard) are only mentioned inside the
 summary and the location's visit text. Do not give the player character an entry. Use the
 fullest known name as "name" and put shorter forms ("Brandt") in aliases. For a location, name
-it specifically enough to be unique ("Ruie Highport Bar", not "Highport Bar").
+it specifically enough to be unique ("Ruie Highport Bar", not "Highport Bar"). If an existing
+wiki entry above is the same person, place or thing, reuse its exact name.
 
 "visit" is what happened with that entity in THIS scene (1-3 sentences). "current_state" is a
 short up-to-date description of the entity overall, merging the existing entry's state with what

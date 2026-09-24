@@ -20,7 +20,8 @@ _ENTITY = {
     "properties": {
         "name": {"type": "string"},
         "aliases": {"type": "array", "items": {"type": "string"}},
-        "kind": {"type": "string"},
+        "kind": {"type": "string", "enum": ["location", "npc", "ship", "vehicle", "organisation",
+                                            "item", "other"]},
         "role": {"type": "string"},
         "visit": {"type": "string"},
         "current_state": {"type": "string"},
