@@ -67,6 +67,41 @@ def _clip(text: str, n: int) -> str:
 
 # ---- scene tracking ---------------------------------------------------------
 
+async def _verdict(campaign: Campaign, router: LLMClient, state: State, messages: list[dict],
+                   user_idx: int) -> dict:
+    """Ask whether the exchange starting at messages[user_idx] opens a new scene. `messages`
+    may run past that exchange (backfill); only the current scene up to it is shown."""
+    current = state.current
+    upto = messages[: user_idx + 2]
+    recent = [m for m in upto if m["id"] >= current.start][-6:]
+    user_id = messages[user_idx]["id"]
+    recent_text = "\n\n".join(
+        f"{'>>> LATEST ' if m['id'] >= user_id else ''}"
+        f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {_clip(m['content'], 1500)}"
+        for m in recent)
+    return await router.json(
+        [{"role": "system", "content": router_system(campaign, state)},
+         {"role": "user", "content": prompts.TRACK_TASK.format(
+             location=current.location or "unknown", recent=recent_text)}],
+        TRACK_SCHEMA, max_tokens=400)
+
+
+def _apply(state: State, verdict: dict, user_id: int, threshold: float) -> bool:
+    """Record a verdict on the state. Returns True if a new scene was opened."""
+    if verdict.get("transition") and verdict.get("confidence", 0) >= threshold:
+        ending = state.current
+        ending.status = "closed_provisional"
+        ending.title = ending.title or verdict.get("scene_title")
+        state.scenes.append(Scene(
+            id=ending.id + 1, start=user_id, location=verdict.get("new_location"),
+            confidence=verdict.get("confidence"), reason=verdict.get("reason")))
+        state.fold = None
+        return True
+    if not state.current.location and verdict.get("location_now"):
+        state.current.location = verdict["location_now"]
+    return False
+
+
 async def track(campaign: Campaign, router: LLMClient, threshold: float) -> dict | None:
     """Run after each DM reply. Opens a new provisional scene if the router is confident the
     latest exchange moved somewhere new. Returns the verdict (or None if skipped)."""
@@ -74,36 +109,38 @@ async def track(campaign: Campaign, router: LLMClient, threshold: float) -> dict
     messages = campaign.messages()
     if len(messages) < 2 or messages[-1]["role"] != "assistant" or messages[-2]["role"] != "user":
         return None
-    current = state.current
     user_msg = messages[-2]
-    if user_msg["id"] <= current.start:
+    if user_msg["id"] <= state.current.start:
         return None  # this exchange already opened the current scene
-    recent = [m for m in wiki.scene_messages(campaign, state, current.id, messages)][-6:]
-    recent_text = "\n\n".join(
-        f"{'>>> LATEST ' if m['id'] >= user_msg['id'] else ''}"
-        f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {_clip(m['content'], 1500)}"
-        for m in recent)
-    verdict = await router.json(
-        [{"role": "system", "content": router_system(campaign, state)},
-         {"role": "user", "content": prompts.TRACK_TASK.format(
-             location=current.location or "unknown", recent=recent_text)}],
-        TRACK_SCHEMA, max_tokens=400)
+    verdict = await _verdict(campaign, router, state, messages, len(messages) - 2)
 
-    state = campaign.load_state()  # re-read: the player may have regenerated meanwhile
-    if state.current.id != current.id or campaign.messages()[-1]["id"] != messages[-1]["id"]:
+    fresh = campaign.load_state()  # re-read: the player may have regenerated meanwhile
+    if fresh.current.id != state.current.id or campaign.messages()[-1]["id"] != messages[-1]["id"]:
         return verdict
-    if verdict.get("transition") and verdict.get("confidence", 0) >= threshold:
-        ending = state.current
-        ending.status = "closed_provisional"
-        ending.title = ending.title or verdict.get("scene_title")
-        state.scenes.append(Scene(
-            id=ending.id + 1, start=user_msg["id"], location=verdict.get("new_location"),
-            confidence=verdict.get("confidence"), reason=verdict.get("reason")))
-        state.fold = None
-    elif not current.location and verdict.get("location_now"):
-        state.scenes[-1].location = verdict["location_now"]
-    campaign.save_state(state)
+    _apply(fresh, verdict, user_msg["id"], threshold)
+    campaign.save_state(fresh)
     return verdict
+
+
+async def backfill(campaign: Campaign, router: LLMClient, threshold: float,
+                   progress=None) -> int:
+    """Segment an imported history into scenes by replaying scene tracking over every
+    exchange. Resumable: starts after the last exchange already tracked. Returns scenes opened."""
+    state = campaign.load_state()
+    messages = campaign.messages()
+    opened = 0
+    done_until = state.tracked_until or 0
+    user_idxs = [i for i, m in enumerate(messages[:-1])
+                 if m["role"] == "user" and messages[i + 1]["role"] == "assistant"
+                 and m["id"] > max(done_until, state.current.start)]
+    for n, i in enumerate(user_idxs, 1):
+        verdict = await _verdict(campaign, router, state, messages, i)
+        opened += _apply(state, verdict, messages[i]["id"], threshold)
+        state.tracked_until = messages[i + 1]["id"]
+        campaign.save_state(state)
+        if progress:
+            progress(n, len(user_idxs), verdict)
+    return opened
 
 
 def undo_scenes_from(campaign: Campaign, first_dead_id: int) -> None:

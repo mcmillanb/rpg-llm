@@ -34,6 +34,7 @@ class Scene:
 class State:
     scenes: list[Scene] = field(default_factory=list)
     fold: dict | None = None  # {"until": msg id, "summary": str} for an oversized current scene
+    tracked_until: int | None = None  # last transcript id covered by a history backfill
 
     @property
     def current(self) -> Scene:
@@ -90,12 +91,13 @@ class Campaign:
     def load_state(self) -> State:
         raw = self._yaml("state.yaml", {})
         scenes = [Scene(**s) for s in raw.get("scenes", [])] or [Scene(id=1, start=1)]
-        return State(scenes=scenes, fold=raw.get("fold"))
+        return State(scenes=scenes, fold=raw.get("fold"), tracked_until=raw.get("tracked_until"))
 
     def save_state(self, state: State) -> None:
         self._write_yaml("state.yaml", {
             "scenes": [{k: v for k, v in vars(s).items() if v is not None} for s in state.scenes],
             "fold": state.fold,
+            "tracked_until": state.tracked_until,
         })
 
     def gazetteer(self) -> list[dict]:

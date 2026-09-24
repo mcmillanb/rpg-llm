@@ -230,3 +230,39 @@ def test_regenerate_replaces_last_reply(tmp_path):
         assert [m["content"] for m in msgs] == ["go", "second"]
         # the regenerated prompt must not contain the discarded reply
         assert all(m["content"] != "first" for m in dm.calls[1][1])
+
+
+# ---- import -----------------------------------------------------------------
+
+def test_openwebui_import_follows_visible_branch_and_splits_reasoning(vault, tmp_path):
+    from rpg_llm.importers import openwebui
+
+    export = [{"title": "Traveller", "chat": {"params": {"system": "Be gritty."}, "history": {
+        "currentId": "a2b",
+        "messages": {
+            "u1": {"id": "u1", "parentId": None, "role": "user", "content": "Hi", "timestamp": 100},
+            "a1": {"id": "a1", "parentId": "u1", "role": "assistant", "content": "old reply",
+                   "timestamp": 101},
+            "a2b": {"id": "a2b", "parentId": "u1", "role": "assistant", "timestamp": 102,
+                    "content": '<details type="reasoning" done="true"><summary>Thought</summary>\n'
+                               '> pondering\n</details>\nWelcome aboard.'},
+        }}}}]
+    p = tmp_path / "export.json"
+    p.write_text(json.dumps(export))
+    chat = openwebui.load_chats(p)[0]
+    c = openwebui.import_chat(vault, chat, system="Traveller")
+    msgs = c.messages()
+    assert [m["content"] for m in msgs] == ["Hi", "Welcome aboard."]
+    assert msgs[1]["reasoning"] == "pondering" and msgs[1]["ts"] == 102
+    assert c.meta["name"] == "Traveller" and c.meta["dm_instructions"] == "Be gritty."
+
+
+async def test_backfill_segments_history_and_resumes(vault):
+    c = vault.create("Test")
+    play(c, ("a", "A"), ("go", "At the ship."), ("b", "B"))
+    llm = FakeLLM([verdict(True, 0.9, "ship"), verdict(False, 0.9)])  # first exchange is skipped
+    assert await router.backfill(c, llm, 0.7) == 1
+    s = c.load_state()
+    assert [(x.start, x.status) for x in s.scenes] == [(1, "closed_provisional"), (3, "open")]
+    assert s.tracked_until == 6
+    assert await router.backfill(c, FakeLLM([]), 0.7) == 0  # nothing left to do
