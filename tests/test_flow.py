@@ -83,9 +83,10 @@ def verdict(transition, confidence, new_location=None):
 async def test_track_opens_scene_only_above_threshold(vault):
     c = vault.create("Test")
     play(c, ("a", "A"), ("we leave", "You arrive at the ship."))
-    await router.track(c, FakeLLM([verdict(True, 0.5, "ship")]), threshold=0.7)
+    low = {**verdict(True, 0.5, "ship"), "location_now": "bar"}
+    await router.track(c, FakeLLM([low]), threshold=0.7)
     assert len(c.load_state().scenes) == 1
-    assert c.load_state().current.location == "ship"  # location_now fills an unknown location
+    assert c.load_state().current.location == "bar"  # location_now fills an unknown location
 
     await router.track(c, FakeLLM([verdict(True, 0.9, "ship")]), threshold=0.7)
     s = c.load_state().scenes
@@ -260,10 +261,12 @@ def test_openwebui_import_follows_visible_branch_and_splits_reasoning(vault, tmp
 async def test_backfill_segments_history_and_resumes(vault):
     c = vault.create("Test")
     play(c, ("a", "A"), ("go", "At the ship."), ("b", "B"))
-    llm = FakeLLM([verdict(True, 0.9, "ship"), verdict(False, 0.9)])  # first exchange is skipped
+    # the opening exchange only sets the location, so it can't open a scene even if asked
+    llm = FakeLLM([verdict(True, 0.9, "bar"), verdict(True, 0.9, "ship"), verdict(False, 0.9)])
     assert await router.backfill(c, llm, 0.7) == 1
     s = c.load_state()
-    assert [(x.start, x.status) for x in s.scenes] == [(1, "closed_provisional"), (3, "open")]
+    assert [(x.start, x.status, x.location) for x in s.scenes] == \
+        [(1, "closed_provisional", "bar"), (3, "open", "ship")]
     assert s.tracked_until == 6
     assert await router.backfill(c, FakeLLM([]), 0.7) == 0  # nothing left to do
 
@@ -286,3 +289,19 @@ async def test_fold_condenses_oldest_live_messages_and_survives_scene_change(vau
     c.append({"role": "assistant", "content": "At the ship."})
     await router.track(c, FakeLLM([verdict(True, 0.9, "ship")]), threshold=0.7)
     assert c.load_state().fold is not None
+
+
+def test_dialogue_is_not_movement_evidence():
+    reply = ('Serevane stands. "Forty minutes. The *Kestrel.* Not the bay. The *hull.*" '
+             'She walks out.')
+    assert router.quote_is_dialogue("Forty minutes. The *Kestrel.* Not the bay. The *hull.*", reply)
+    assert not router.quote_is_dialogue("She walks out.", reply)
+    assert not router.quote_is_dialogue("none", reply)
+    assert not router.quote_is_dialogue("something paraphrased", reply)
+
+
+def test_same_place_by_name_containment():
+    assert router.same_place("Maren's Gutter", "Back room of Maren's Gutter")
+    assert router.same_place("The Wandering Star", "Wandering Star cargo bay")
+    assert not router.same_place("Efate system", "Efate startown freight brokers' hall")
+    assert not router.same_place(None, "Regina")

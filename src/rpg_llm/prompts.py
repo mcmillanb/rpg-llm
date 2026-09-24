@@ -57,8 +57,8 @@ A new scene means the GM's reply shows one of:
 
 NOT a new scene:
 - conversation, combat, haggling, or investigation continuing in the same place
-- moving between rooms or decks of the same building or ship (bar to back room, bridge to
-  cargo bay)
+- moving between rooms, booths, floors or decks of the same building or ship (bar to its back
+  room, bridge to cargo bay): that is still the same place, so keep the current location name
 - the player announcing or planning a move that the GM's reply has not yet carried out, or
   that the GM's reply blocks or delays (the characters are still where they were)
 - places that are only mentioned, described, pointed at, or visible (an NPC describing a pickup
@@ -74,9 +74,10 @@ Recent exchanges (oldest first):
 {recent}
 
 Return JSON:
-- movement_quote: the exact words from the LATEST GM reply that narrate the player character
-  travelling to or arriving at a different place, or narrate a time skip. "none" if there are
-  no such words (an NPC talking about a place, or a place being visible, is not movement).
+- movement_quote: the exact words from the LATEST GM reply's NARRATION that describe the player
+  character travelling to or arriving at a different place, or a time skip. "none" if there are
+  no such words. Dialogue never counts: anything a character says inside quotation marks
+  (directions, a meeting place, a plan) is not movement, and neither is a place being visible.
 - location_now: where the player character is physically standing at the end of the LATEST GM
   reply (or null if unknown). Use the same name as the current scene location if they have not
   moved to a different place.

@@ -147,7 +147,9 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
              "rounds": 0}
     t_dm = time.time()
     yield sse({"type": "status", "text": ""})
-    for _ in range(MAX_TOOL_ROUNDS):
+    for n in range(MAX_TOOL_ROUNDS + 1):
+        if n == MAX_TOOL_ROUNDS:  # still looking things up: make it answer with what it has
+            kwargs.pop("tools", None)
         calls = None
         round_content = ""
         async for d in rt.dm.stream(convo, **kwargs):

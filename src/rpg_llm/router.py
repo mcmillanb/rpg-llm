@@ -7,6 +7,7 @@ process the short task-specific part.
 
 import asyncio
 import logging
+import re
 
 from rpg_llm import prompts, wiki
 from rpg_llm.llm import LLMClient
@@ -81,11 +82,60 @@ async def _verdict(campaign: Campaign, router: LLMClient, state: State, messages
         f"{'>>> LATEST ' if m['id'] >= user_id else ''}"
         f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {_clip(m['content'], 1500)}"
         for m in recent)
-    return await router.json(
+    verdict = await router.json(
         [{"role": "system", "content": router_system(campaign, state)},
          {"role": "user", "content": prompts.TRACK_TASK.format(
              location=current.location or "unknown", recent=recent_text)}],
         TRACK_SCHEMA, max_tokens=400)
+    reply = upto[-1]["content"] if upto and upto[-1]["role"] == "assistant" else ""
+    overrule = None
+    if verdict.get("transition"):
+        if quote_is_dialogue(verdict.get("movement_quote", ""), reply):
+            overrule = "evidence was dialogue"
+        elif same_place(current.location, verdict.get("new_location") or verdict.get("location_now")):
+            overrule = "same place"
+    if overrule:
+        verdict = {**verdict, "transition": False, "new_location": None,
+                   "reason": f"[overruled: {overrule}] " + verdict.get("reason", "")}
+    return verdict
+
+
+_INTERIOR = set("""of the a in at on inside aboard back front main upper lower rear private side
+room rooms booth table counter bar corner kitchen cellar basement upstairs downstairs attic
+office hall hallway corridor lobby lounge stairs stairwell balcony roof rooftop door doorway
+entrance alley deck bridge cockpit hold cargo bay engine engineering airlock cabin cabins
+quarters galley medbay sickbay locker ramp hatch""".split())
+
+
+def same_place(current: str | None, new: str | None) -> bool:
+    """True when one name is the other plus words for a part of it ("Back room of Maren's
+    Gutter", "Wandering Star cargo bay"): moving within a building or ship. "Efate" vs "Efate
+    startown" is not, since "startown" is somewhere else."""
+    a = re.sub(r"^the ", "", _norm(current or ""))
+    b = re.sub(r"^the ", "", _norm(new or ""))
+    if len(a) < 4 or len(b) < 4:
+        return False
+    short, long_ = sorted((a, b), key=len)
+    if short not in long_:
+        return False
+    extra = re.findall(r"[a-z']+", long_.replace(short, " "))
+    return all(w.strip("'s") in _INTERIOR or w in _INTERIOR for w in extra)
+
+
+_DIALOGUE = re.compile(r'"[^"]*"|“[^”]*”')
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[\s*_\"“”]+", " ", text).strip().lower()
+
+
+def quote_is_dialogue(quote: str, reply: str) -> bool:
+    """True if the router's movement evidence only appears inside quoted speech in the GM
+    reply ("Meet me at the hull in forty minutes"), which is never actual movement."""
+    q = _norm(quote or "")
+    if not q or q == "none" or q not in _norm(reply):
+        return False
+    return q not in _norm(_DIALOGUE.sub(" ", reply))
 
 
 def _apply(state: State, verdict: dict, user_id: int, threshold: float) -> bool:
@@ -111,9 +161,12 @@ async def track(campaign: Campaign, router: LLMClient, threshold: float) -> dict
     if len(messages) < 2 or messages[-1]["role"] != "assistant" or messages[-2]["role"] != "user":
         return None
     user_msg = messages[-2]
-    if user_msg["id"] <= state.current.start:
-        return None  # this exchange already opened the current scene
+    opening = user_msg["id"] <= state.current.start  # this exchange opened the current scene
+    if opening and state.current.location:
+        return None
     verdict = await _verdict(campaign, router, state, messages, len(messages) - 2)
+    if opening:  # only learn where the scene is; it can't end on its first exchange
+        verdict = {**verdict, "transition": False}
 
     fresh = campaign.load_state()  # re-read: the player may have regenerated meanwhile
     if fresh.current.id != state.current.id or campaign.messages()[-1]["id"] != messages[-1]["id"]:
@@ -133,9 +186,14 @@ async def backfill(campaign: Campaign, router: LLMClient, threshold: float,
     done_until = state.tracked_until or 0
     user_idxs = [i for i, m in enumerate(messages[:-1])
                  if m["role"] == "user" and messages[i + 1]["role"] == "assistant"
-                 and m["id"] > max(done_until, state.current.start)]
+                 and m["id"] > done_until and m["id"] >= state.current.start]
     for n, i in enumerate(user_idxs, 1):
+        opening = messages[i]["id"] <= state.current.start
+        if opening and state.current.location:
+            continue
         verdict = await _verdict(campaign, router, state, messages, i)
+        if opening:
+            verdict = {**verdict, "transition": False}
         opened += _apply(state, verdict, messages[i]["id"], threshold)
         state.tracked_until = messages[i + 1]["id"]
         campaign.save_state(state)
