@@ -44,7 +44,14 @@ ARCHIVE_SCHEMA = {
     "additionalProperties": False,
 }
 
-TRANSCRIPT_CHAR_LIMIT = 250_000
+TRANSCRIPT_CHAR_LIMIT = 250_000  # hard ceiling even for huge context windows
+
+
+async def transcript_limit(archiver: LLMClient) -> int:
+    """How much transcript (in characters) fits in the archiver's context, leaving ~40% for
+    the prompt, the known-entity list and a long JSON answer. Unknown window: assume 32k."""
+    window = await archiver.context_window() or 32768
+    return min(TRANSCRIPT_CHAR_LIMIT, int(window * 0.6 * 3))  # ~3 chars/token, conservative
 
 
 def _link(entry: dict) -> str:
@@ -55,7 +62,7 @@ async def file_scene(campaign: Campaign, archiver: LLMClient, state: State, scen
                      lock: asyncio.Lock) -> dict:
     scene = next(s for s in state.scenes if s.id == scene_id)
     msgs = wiki.scene_messages(campaign, state, scene_id)
-    transcript = wiki.format_transcript(msgs, limit_chars=TRANSCRIPT_CHAR_LIMIT)
+    transcript = wiki.format_transcript(msgs, limit_chars=await transcript_limit(archiver))
     gazetteer = campaign.gazetteer()
     known = wiki.mentioned(gazetteer, transcript)
     known_text = "\n".join(f"- {e['name']}: {wiki.current_state(campaign, e['path'])}"
@@ -171,7 +178,7 @@ async def fold_current_scene(campaign: Campaign, archiver: LLMClient, keep_token
         [{"role": "system", "content": prompts.ARCHIVE_SYSTEM},
          {"role": "user", "content": prompts.FOLD_TASK.format(
              previous=f"\nSummary so far of this scene:\n{prev_fold}\n" if prev_fold else "",
-             transcript=wiki.format_transcript(cut, limit_chars=TRANSCRIPT_CHAR_LIMIT))}],
+             transcript=wiki.format_transcript(cut, limit_chars=await transcript_limit(archiver)))}],
         max_tokens=1500, temperature=0.3, extra_body=NO_THINKING)
     async with lock:
         fresh = campaign.load_state()
