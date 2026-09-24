@@ -229,8 +229,11 @@ async def gatekeep(campaign: Campaign, router: LLMClient | None, message: str,
     if not gazetteer:
         return None, info
 
-    # names in the GM's last reply are already in play, so matching them adds nothing
-    in_play = {e["path"] for e in wiki.mentioned(gazetteer, last_reply)}
+    # Already in play: anything named in the GM's last reply, and where the characters are now.
+    # Adding their notes again only costs context (the GM can still look them up with tools).
+    in_play = {e["path"] for e in wiki.mentioned(gazetteer, last_reply,
+                                                   state.current.location or "")}
+    info["in_play"] = sorted(in_play)
     paths = [e["path"] for e in wiki.mentioned(gazetteer, message) if e["path"] not in in_play]
     info["alias_hits"] = list(paths)
     scene_ids: list[int] = []
@@ -243,7 +246,8 @@ async def gatekeep(campaign: Campaign, router: LLMClient | None, message: str,
                 GATE_SCHEMA, max_tokens=300), timeout)
             info["router"] = pick
             known = {e["path"] for e in gazetteer}
-            paths += [p for p in pick.get("notes", [])[:3] if p in known and p not in paths]
+            paths += [p for p in pick.get("notes", [])[:3]
+                      if p in known and p not in paths and p not in in_play]
             filed = {s.id for s in state.scenes if s.status == "compacted"}
             scene_ids = [i for i in pick.get("scenes", []) if i in filed][:1]
         except (TimeoutError, Exception) as e:  # never block play on the router

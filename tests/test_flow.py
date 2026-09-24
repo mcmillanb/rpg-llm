@@ -412,3 +412,18 @@ async def test_background_filing_waits_for_the_player(tmp_path, monkeypatch):
     rt.seen[c.slug] = 0
     await asyncio.wait_for(task, 10)
     assert calls == ["filed"]
+
+
+async def test_gatekeeper_skips_what_is_already_in_play(vault):
+    c = vault.create("Test")
+    c.save_gazetteer([
+        {"name": "Efate", "aliases": [], "type": "location", "path": "locations/efate.md"},
+        {"name": "Wandering Star", "aliases": [], "type": "ship", "path": "things/ws.md"},
+        {"name": "Pell", "aliases": [], "type": "npc", "path": "npcs/pell.md"},
+    ])
+    c.save_state(State(scenes=[Scene(1, 1, location="Efate startown")]))
+    llm = FakeLLM([{"notes": ["locations/efate.md", "things/ws.md", "npcs/pell.md"],
+                    "scenes": [], "reason": "r"}])
+    _, info = await router.gatekeep(c, llm, "I haggle, then ask about Pell",
+                                    "Back aboard the Wandering Star, Dex waits.", timeout=5)
+    assert info["injected"] == ["npcs/pell.md"]

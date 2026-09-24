@@ -18,7 +18,8 @@ CASES = [
     ("I check the fuel gauge and ask Dex how the drive is holding up.", set()),
     ("Has a skinny man in a grey coat been through here lately?", {"pell"}),
     ("I wonder aloud if that loan shark back home has put a bounty on us yet.", {"brandt"}),
-    ("Before we leave, I want to go back to the bar where we met the broker.", {"bar"}),
+    # "where we met the broker" points at Pell too
+    ("Before we leave, I want to go back to the bar where we met the broker.", {"bar", "pell"}),
     ("I haggle over the price of fuel.", set()),
 ]
 

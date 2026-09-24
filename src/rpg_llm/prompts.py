@@ -101,9 +101,10 @@ next message. The game master already has the campaign brief and the whole curre
 Most messages need NOTHING. Return empty lists unless the player's message refers to a
 specific person, place, deal, object, or event from an EARLIER scene whose details are not
 already in the brief or the latest GM reply. Indirect references count ("the planet where we
-lost the cargo", "that skinny broker", "the loan shark back home"). Do not pick notes just
-because they are about the same topic, setting, or ship; do not pick anything for actions that
-only involve what is happening right now.
+lost the cargo", "that skinny broker", "the loan shark back home"). Pick only what the message
+itself points at: not people or places merely connected to it, not the ship or crew for routine
+actions aboard, not the place the characters are in now (unless the message asks about its
+past), and nothing for actions that only involve what is happening right now.
 
 At most 3 notes and 1 scene.
 
