@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     dm_model: str = "default"
     dm_api_key: str = "none"
     dm_context_window: int | None = None
+    dm_thinking: bool = True  # False asks Qwen-style models to skip their reasoning (faster)
 
     router_base_url: str | None = None
     router_model: str | None = None

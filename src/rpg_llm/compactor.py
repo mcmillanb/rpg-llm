@@ -137,6 +137,11 @@ async def compact(campaign: Campaign, router_llm: LLMClient, archiver: LLMClient
         filed.append(await file_scene(campaign, archiver, campaign.load_state(), sid, lock))
     if filed:
         await rewrite_brief(campaign, archiver, filed)
+    async with lock:
+        state = campaign.load_state()
+        if state.fold and state.fold["until"] < state.live_start():
+            state.fold = None  # everything it condensed is filed now
+            campaign.save_state(state)
     report["filed"] = filed
     report["seconds"] = round(time.time() - report.pop("started"), 1)
     return report

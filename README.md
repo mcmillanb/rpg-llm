@@ -56,6 +56,7 @@ docker compose up -d --build
 | `DM_BASE_URL`, `DM_MODEL`, `DM_API_KEY` | | the GM model |
 | `ROUTER_…`, `ARCHIVER_…` | DM's values | same fields per model |
 | `*_CONTEXT_WINDOW` | detected | override if the server doesn't report it |
+| `DM_THINKING` | true | false skips Qwen's reasoning: replies start ~5–10 s sooner, possibly less considered |
 | `VAULT_PATH` | `./vault` | campaign folders live in `VAULT_PATH/campaigns/` |
 | `LIVE_TAIL_PCT` | 50 | share of the GM's context window the live tail may use before the oldest part of the current scene is condensed |
 | `ROUTER_THRESHOLD` | 0.7 | confidence needed to call a scene change |

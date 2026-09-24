@@ -97,7 +97,6 @@ def _apply(state: State, verdict: dict, user_id: int, threshold: float) -> bool:
         state.scenes.append(Scene(
             id=ending.id + 1, start=user_id, location=verdict.get("new_location"),
             confidence=verdict.get("confidence"), reason=verdict.get("reason")))
-        state.fold = None
         return True
     if not state.current.location and verdict.get("location_now"):
         state.current.location = verdict["location_now"]
@@ -154,8 +153,9 @@ def undo_scenes_from(campaign: Campaign, first_dead_id: int) -> None:
         state.scenes.pop()
         state.scenes[-1].status = "open"
         changed = True
+    if state.fold and state.fold["until"] >= first_dead_id:
+        state.fold, changed = None, True  # the condensed part included discarded messages
     if changed:
-        state.fold = None
         campaign.save_state(state)
 
 

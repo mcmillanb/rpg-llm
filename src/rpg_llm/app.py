@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from rpg_llm import compactor, context, router, wiki
 from rpg_llm.config import Settings
-from rpg_llm.llm import LLMClient
+from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
 
 log = logging.getLogger("rpg_llm")
@@ -139,7 +139,9 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
         state = c.load_state()
 
     convo = context.build(c, state, messages, notes)
-    tools = {"tools": wiki.TOOLS} if c.gazetteer() else {}  # nothing to look up yet
+    kwargs = {"tools": wiki.TOOLS} if c.gazetteer() else {}  # nothing to look up yet
+    if not rt.settings.dm_thinking:
+        kwargs["extra_body"] = NO_THINKING
     content, reasoning, trace = "", "", []
     stats = {"prompt_tokens": 0, "cached_tokens": 0, "prompt_ms": 0, "completion_tokens": 0,
              "rounds": 0}
@@ -148,7 +150,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     for _ in range(MAX_TOOL_ROUNDS):
         calls = None
         round_content = ""
-        async for d in rt.dm.stream(convo, **tools):
+        async for d in rt.dm.stream(convo, **kwargs):
             if "reasoning" in d:
                 reasoning += d["reasoning"]
                 yield sse({"type": "reasoning", "text": d["reasoning"]})

@@ -266,3 +266,23 @@ async def test_backfill_segments_history_and_resumes(vault):
     assert [(x.start, x.status) for x in s.scenes] == [(1, "closed_provisional"), (3, "open")]
     assert s.tracked_until == 6
     assert await router.backfill(c, FakeLLM([]), 0.7) == 0  # nothing left to do
+
+
+# ---- fold -------------------------------------------------------------------
+
+async def test_fold_condenses_oldest_live_messages_and_survives_scene_change(vault):
+    c = vault.create("Test")
+    play(c, *[(f"u{i} " + "x" * 300, f"g{i} " + "y" * 300) for i in range(6)])
+    archiver = FakeLLM(chat_reply="Condensed story.")
+    await compactor.fold_current_scene(c, archiver, keep_tokens=250, lock=asyncio.Lock())
+    state = c.load_state()
+    assert state.fold["summary"] == "Condensed story."
+    kept = context.live_tail(state, c.messages())
+    assert 2 <= len(kept) < 12 and kept[-1]["content"].startswith("g5")
+    assert "Condensed story." in context.build(c, state, c.messages())[0]["content"]
+
+    # a scene change must not bring the condensed messages back
+    c.append({"role": "user", "content": "we leave"})
+    c.append({"role": "assistant", "content": "At the ship."})
+    await router.track(c, FakeLLM([verdict(True, 0.9, "ship")]), threshold=0.7)
+    assert c.load_state().fold is not None

@@ -18,7 +18,7 @@ def system_prompt(campaign: Campaign, state: State) -> str:
         brief=campaign.brief.strip() or "(nothing yet)",
     )
     if state.fold:
-        text += f"\n# Earlier in the current scene\n\n{state.fold['summary']}\n"
+        text += f"\n# Earlier in this session (condensed)\n\n{state.fold['summary']}\n"
     return text
 
 
