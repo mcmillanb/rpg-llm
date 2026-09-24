@@ -1,5 +1,9 @@
 # Milestone 1 Plan: Minimal Working Loop
 
+> **Status 2026-09-24:** steps 1–8 are built and tested against the real models (see the
+> README). Step 9, real play and tuning, is next. Pre-fetch was left out: the gatekeeper is fast
+> enough without it (see `TODO.md`).
+
 Scope is from `BUILD_SPEC.md`: one Traveller narrative campaign, chat UI → DM model, a vault with one
 campaign folder, a router/archivist that keeps the wiki and chooses context, and resume that
 always keeps the current scene live. Not in scope: rules modules, story arc, consequence setting,
