@@ -58,7 +58,9 @@ A new scene means the GM's reply shows one of:
 NOT a new scene:
 - conversation, combat, haggling, or investigation continuing in the same place
 - moving between rooms, booths, floors or decks of the same building or ship (bar to its back
-  room, bridge to cargo bay): that is still the same place, so keep the current location name
+  room, bridge to cargo bay), or exploring deeper into the same site (going inside a wreck,
+  down a shaft, into the next cave chamber): that is still the same place, so keep the current
+  location name
 - the player announcing or planning a move that the GM's reply has not yet carried out, or
   that the GM's reply blocks or delays (the characters are still where they were)
 - places that are only mentioned, described, pointed at, or visible (an NPC describing a pickup
@@ -78,9 +80,11 @@ Return JSON:
   character travelling to or arriving at a different place, or a time skip. "none" if there are
   no such words. Dialogue never counts: anything a character says inside quotation marks
   (directions, a meeting place, a plan) is not movement, and neither is a place being visible.
-- location_now: where the player character is physically standing at the end of the LATEST GM
-  reply (or null if unknown). Use the same name as the current scene location if they have not
-  moved to a different place.
+- location_now: the site where the player character is at the end of the LATEST GM reply (or
+  null if unknown). Name a whole site, never a room or spot within it: "the crashed ship T-8941",
+  "Maren's Gutter", "Efate startown", not "the engineering deck" or "bottom of the shaft". Use the
+  same name as the current scene location if they are still at the same site. A ship is always
+  its own site, separate from the port, station or planet where it is docked or landed.
 - reason: one sentence comparing location_now with the current scene location (and noting any
   time skip)
 - transition: true only if movement_quote is not "none" AND (location_now is a different place
