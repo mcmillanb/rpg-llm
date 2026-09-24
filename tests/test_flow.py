@@ -427,3 +427,18 @@ async def test_gatekeeper_skips_what_is_already_in_play(vault):
     _, info = await router.gatekeep(c, llm, "I haggle, then ask about Pell",
                                     "Back aboard the Wandering Star, Dex waits.", timeout=5)
     assert info["injected"] == ["npcs/pell.md"]
+
+
+def test_unsend_withdraws_last_message_and_reply(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[[{"content": "One."}], [{"content": "Two."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 2), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        client.post(f"/api/campaigns/{slug}/chat", json={"content": "first"})
+        client.post(f"/api/campaigns/{slug}/chat", json={"content": "oops, half a thou"})
+        r = client.post(f"/api/campaigns/{slug}/unsend").json()
+        assert r["content"] == "oops, half a thou"
+        msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
+        assert [m["content"] for m in msgs] == ["first", "One."]
+        assert msgs[-1]["stats"]["total"] >= 0 and "first_word" in msgs[-1]["stats"]

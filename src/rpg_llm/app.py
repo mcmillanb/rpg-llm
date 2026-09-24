@@ -162,6 +162,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     """Assumes the player's message is already the last active user message. Streams SSE."""
     st = rt.st(c.slug)
     st["error"] = None
+    t_turn = time.time()
     messages = c.messages()
     user = messages[-1]
     last_reply = next((m["content"] for m in reversed(messages[:-1]) if m["role"] == "assistant"), "")
@@ -203,6 +204,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                 reasoning += d["reasoning"]
                 yield sse({"type": "reasoning", "text": d["reasoning"]})
             elif "content" in d:
+                if "first_word" not in stats:
+                    stats["first_word"] = round(time.time() - t_turn, 1)
                 round_content += d["content"]
                 yield sse({"type": "content", "text": d["content"]})
             elif "tool_calls" in d:
@@ -225,7 +228,11 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
             convo.append({"role": "tool", "tool_call_id": tc["id"] or f"call_{i}", "content": result})
 
     stats["seconds"] = round(time.time() - t_dm, 1)
+    stats["total"] = round(time.time() - t_turn, 1)
+    stats["archive_check"] = info["seconds"]
     log.info("DM turn %s: %s", c.slug, stats)
+    if user["id"] not in {m["id"] for m in c.messages()}:
+        return  # the player unsent their message while the GM was replying
     entry = {"role": "assistant", "content": content.strip(), "reasoning": reasoning.strip(),
              "stats": stats}
     if trace:
@@ -377,6 +384,22 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         router.undo_scenes_from(c, last_user["id"])
         c.append({"role": "user", "content": body.content.strip(), "supersedes": dead})
         return stream_turn(rt, c)
+
+    @app.post("/api/campaigns/{slug}/unsend")
+    async def unsend(slug: str):
+        """Withdraw the player's last message (and any reply to it), e.g. sent by mistake.
+        Nothing is deleted: the transcript records it as superseded. Returns the text so the
+        player can finish it."""
+        rt = R()
+        c = rt.campaign(slug)
+        msgs = c.messages()
+        last_user = next((m for m in reversed(msgs) if m["role"] == "user"), None)
+        if last_user is None:
+            raise HTTPException(400, "nothing to unsend")
+        dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
+        router.undo_scenes_from(c, last_user["id"])
+        c.append({"role": "system", "content": "", "supersedes": dead, "unsent": True})
+        return {"content": last_user["content"]}
 
     @app.post("/api/campaigns/{slug}/compact")
     async def compact_now(slug: str):

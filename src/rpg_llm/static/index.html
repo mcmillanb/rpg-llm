@@ -37,7 +37,9 @@ header h1 { font-size: 17px; margin: 0; flex: 1; min-width: 0; white-space: nowr
   overflow: hidden; text-overflow: ellipsis; }
 #app { display: flex; flex-direction: column; height: 100%; }
 main { flex: 1; overflow-y: auto; }
-.wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+.wrap, .footwrap { width: 80%; margin: 0 auto; padding: 16px; }
+@media (max-width: 900px) { .wrap, .footwrap { width: 100%; } }
+.footwrap { padding: 0; }
 
 /* campaign list */
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
@@ -70,6 +72,7 @@ details.think div { white-space: pre-wrap; max-height: 260px; overflow-y: auto; 
   letter-spacing: .06em; }
 .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .filed .msg { opacity: .72; }
+.msg.user.editing { outline: 2px dashed var(--accent); }
 #more { display: block; margin: 8px auto; }
 
 footer { border-top: 1px solid var(--line); background: var(--panel);
@@ -105,10 +108,12 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
   </header>
   <main id="main"><div class="wrap" id="view"></div></main>
   <footer id="footer" class="hidden">
-    <div id="statusline" class="ui muted"></div>
-    <div class="composer">
-      <textarea id="input" rows="1" placeholder="What do you do?"></textarea>
-      <button id="send" class="primary">Send</button>
+    <div class="footwrap">
+      <div id="statusline" class="ui muted"></div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="What do you do?  (Esc stops a reply and takes your message back · ↑ edits your last message)"></textarea>
+        <button id="send" class="primary">Send</button>
+      </div>
     </div>
   </footer>
 </div>
@@ -169,9 +174,9 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
-async function streamPost(path, body, handlers) {
+async function streamPost(path, body, handlers, signal) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
-                                body: body ? JSON.stringify(body) : undefined });
+                                body: body ? JSON.stringify(body) : undefined, signal });
   if (!r.ok) throw new Error((await r.text()) || r.statusText);
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
   for (;;) {
@@ -246,6 +251,13 @@ function msgHTML(m, isLastUser, isLastGm) {
     const st = m.stats, pct = Math.round(100 * st.cached_tokens / st.prompt_tokens);
     chips.push(`<span class="chip" title="prompt ${st.prompt_tokens} tokens, ${st.cached_tokens} from cache, prefill ${(st.prompt_ms / 1000).toFixed(1)}s, reply ${st.completion_tokens} tokens in ${st.seconds}s">⚡ ${(st.prompt_tokens / 1000).toFixed(1)}k ctx · ${pct}% cached</span>`);
   }
+  if (m.stats?.total != null || m.stats?.seconds != null) {
+    const st = m.stats, total = st.total ?? st.seconds;
+    const tip = [st.first_word != null ? `first words after ${st.first_word}s` : null,
+                 st.archive_check != null ? `archive check ${st.archive_check}s` : null,
+                 `GM ${st.seconds}s`].filter(Boolean).join(", ");
+    chips.push(`<span class="chip" title="${tip}">⏱ ${total}s</span>`);
+  }
   if (m.tools?.length) chips.push(`<span class="chip" title="${esc(m.tools.map(t => t.tool + " " + t.arguments).join("\n"))}">🔎 ${m.tools.length} lookup${m.tools.length > 1 ? "s" : ""}</span>`);
   return `<div class="msg assistant" data-id="${m.id}">
     ${m.reasoning ? `<details class="think"><summary>thinking</summary><div>${esc(m.reasoning)}</div></details>` : ""}
@@ -277,19 +289,40 @@ function renderChat(scroll) {
   $("view").innerHTML = html;
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
-  $("view").querySelectorAll("[data-act=retry]").forEach(b => b.onclick = () => runTurn(`/api/campaigns/${S.slug}/regenerate`, null));
+  $("view").querySelectorAll("[data-act=retry]").forEach(b => b.onclick = () => runTurn(`/api/campaigns/${S.slug}/regenerate`, null, null, "regenerate"));
   $("view").querySelectorAll("[data-act=edit]").forEach(b => b.onclick = () => editLast(lastUser));
   if (scroll) $("main").scrollTop = $("main").scrollHeight;
 }
 
 function setBusy(b) {
-  S.busy = b; $("send").disabled = b;
-  $("send").textContent = b ? "…" : "Send";
+  S.busy = b;
+  $("send").textContent = b ? "Stop" : "Send";
+  $("send").classList.toggle("primary", !b);
+  $("send").title = b ? "Stop the reply and take your message back (Esc)" : "";
 }
 
-async function runTurn(path, body, optimisticUser) {
+// Esc / Stop: cancel the turn. For a new or edited message the message is withdrawn and put
+// back in the box to finish; for a regenerate the reply just stops (Retry is offered).
+async function cancelTurn() {
+  if (!S.busy || !S.abort) return;
+  const turn = S.turn;
+  if (turn.kind !== "regenerate") {
+    S.cancelling = (async () => {
+      try {
+        const r = await api(`/api/campaigns/${S.slug}/unsend`, { method: "POST" });
+        $("input").value = r.content; autosize(); $("input").focus();
+        return "Message taken back: finish it and send again.";
+      } catch (e) { return `Couldn't take it back: ${e.message}`; }
+    })();
+  }
+  S.abort.abort();
+}
+
+async function runTurn(path, body, optimisticUser, kind = "chat") {
   if (S.busy) return;
   setBusy(true);
+  S.abort = new AbortController();
+  S.turn = { kind };
   if (optimisticUser) S.data.messages.push({ id: Infinity, role: "user", content: optimisticUser });
   renderChat(true);
   const box = document.createElement("div");
@@ -319,9 +352,15 @@ async function runTurn(path, body, optimisticUser) {
       tool: (e) => { $("statusline").textContent = `GM is checking the archive: ${e.name} ${e.arguments}`; },
       error: (e) => { throw new Error(e.text); },
       done: () => {},
-    });
+    }, S.abort.signal);
   } catch (err) {
-    $("statusline").innerHTML = `<span class="error">Error: ${esc(err.message)}</span>`;
+    if (err.name !== "AbortError") $("statusline").innerHTML = `<span class="error">Error: ${esc(err.message)}</span>`;
+  }
+  S.abort = null;
+  if (S.cancelling) {  // refresh only once the unsend has landed
+    const msg = await S.cancelling;
+    S.cancelling = null;
+    $("statusline").textContent = msg;
   }
   S.data = await api(`/api/campaigns/${S.slug}`);
   setBusy(false);
@@ -330,14 +369,34 @@ async function runTurn(path, body, optimisticUser) {
 }
 
 function send() {
+  if (S.busy) return cancelTurn();
   const text = $("input").value.trim();
-  if (!text || S.busy) return;
+  if (!text) return;
   $("input").value = ""; autosize();
+  if (S.editing) {  // resend the last message: replaces that exchange
+    const i = S.data.messages.indexOf(S.editing);
+    stopEditing();
+    if (i >= 0) S.data.messages = S.data.messages.slice(0, i);
+    return runTurn(`/api/campaigns/${S.slug}/edit`, { content: text }, text, "edit");
+  }
   runTurn(`/api/campaigns/${S.slug}/chat`, { content: text }, text);
 }
 function regenerate() {
   S.data.messages = S.data.messages.slice(0, -1);
-  runTurn(`/api/campaigns/${S.slug}/regenerate`, null);
+  runTurn(`/api/campaigns/${S.slug}/regenerate`, null, null, "regenerate");
+}
+function startEditing() {
+  const m = [...S.data.messages].reverse().find(x => x.role === "user");
+  if (!m) return;
+  S.editing = m;
+  $("input").value = m.content; autosize();
+  $("input").setSelectionRange(m.content.length, m.content.length);
+  $("view").querySelector(`.msg.user[data-id="${m.id}"]`)?.classList.add("editing");
+  $("statusline").textContent = "Editing your last message: Enter resends it (replacing the GM's reply), Esc cancels.";
+}
+function stopEditing() {
+  $("view").querySelector(".msg.user.editing")?.classList.remove("editing");
+  S.editing = null; $("statusline").textContent = "";
 }
 function editLast(m) {
   const el = $("view").querySelector(`.msg.user[data-id="${m.id}"]`);
@@ -349,7 +408,7 @@ function editLast(m) {
     const content = el.querySelector("textarea").value.trim(); if (!content) return;
     const i = S.data.messages.indexOf(m);
     S.data.messages = S.data.messages.slice(0, i);
-    runTurn(`/api/campaigns/${S.slug}/edit`, { content }, content);
+    runTurn(`/api/campaigns/${S.slug}/edit`, { content }, content, "edit");
   };
 }
 
@@ -420,6 +479,12 @@ function autosize() { const t = $("input"); t.style.height = "auto"; t.style.hei
 $("input").addEventListener("input", autosize);
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); send(); }
+  else if (e.key === "ArrowUp" && !$("input").value && !S.busy && S.slug) { e.preventDefault(); startEditing(); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !S.slug) return;
+  if (S.busy) { e.preventDefault(); cancelTurn(); }
+  else if (S.editing) { e.preventDefault(); $("input").value = ""; autosize(); stopEditing(); }
 });
 $("send").onclick = send;
 $("back").onclick = showList;
