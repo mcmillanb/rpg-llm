@@ -15,6 +15,9 @@ dependencies = [
     "uvicorn[standard]>=0.53.0",
 ]
 
+[project.scripts]
+rpg-llm = "rpg_llm.app:main"
+
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]
 build-backend = "uv_build"

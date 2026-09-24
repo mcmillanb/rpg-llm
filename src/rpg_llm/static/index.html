@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RPG LLM</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
+<style>
+:root {
+  --bg: #f6f4ef; --panel: #ffffff; --ink: #1d1b18; --muted: #6d675e; --line: #e2ddd3;
+  --accent: #9a4a12; --accent-ink: #fff; --player: #eef3f8; --gm: #ffffff; --warn: #a33;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e4dc; --muted: #9a958c; --line: #2d3136;
+    --accent: #e0914d; --accent-ink: #1a1208; --player: #1f2a36; --gm: #1d2024; --warn: #f07a7a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --panel: #1d2024; --ink: #e8e4dc; --muted: #9a958c; --line: #2d3136;
+  --accent: #e0914d; --accent-ink: #1a1208; --player: #1f2a36; --gm: #1d2024; --warn: #f07a7a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+  font: 16px/1.55 Georgia, "Iowan Old Style", "Palatino Linotype", serif; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--panel);
+  border-radius: 8px; padding: 6px 12px; font-family: system-ui, sans-serif; font-size: 14px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+.ui { font-family: system-ui, sans-serif; font-size: 14px; }
+.muted { color: var(--muted); }
+header { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0; flex: 1; min-width: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+#app { display: flex; flex-direction: column; height: 100%; }
+main { flex: 1; overflow-y: auto; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+
+/* campaign list */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 10px; }
+.card.link { cursor: pointer; }
+.card.link:hover { border-color: var(--accent); }
+label { display: block; margin: 10px 0 4px; }
+input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); }
+
+/* chat */
+.msg { margin: 14px 0; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+  overflow-wrap: anywhere; }
+.msg.user { background: var(--player); margin-left: 12%; }
+.msg.assistant { background: var(--gm); }
+.msg p { margin: 0 0 .7em; } .msg p:last-child { margin-bottom: 0; }
+.msg h1, .msg h2, .msg h3 { font-size: 1.05em; margin: .8em 0 .4em; }
+.msg ul, .msg ol { margin: 0 0 .7em; padding-left: 1.3em; }
+.msg code { font-family: var(--mono); font-size: .9em; }
+.msg hr { border: 0; border-top: 1px solid var(--line); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.chip { font: 12px system-ui, sans-serif; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 8px; }
+.actions button { padding: 2px 8px; font-size: 12px; }
+details.think { margin-bottom: 8px; font: 13px/1.45 system-ui, sans-serif; color: var(--muted); }
+details.think summary { cursor: pointer; }
+details.think div { white-space: pre-wrap; max-height: 260px; overflow-y: auto; padding: 6px 0; }
+.divider { display: flex; align-items: center; gap: 10px; margin: 22px 0 8px;
+  font: 12px system-ui, sans-serif; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .06em; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.filed .msg { opacity: .72; }
+#more { display: block; margin: 8px auto; }
+
+footer { border-top: 1px solid var(--line); background: var(--panel);
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); }
+#statusline { min-height: 18px; margin-bottom: 6px; }
+.composer { display: flex; gap: 8px; align-items: flex-end; }
+#input { resize: none; max-height: 40vh; min-height: 44px; }
+.error { color: var(--warn); }
+
+/* drawer */
+#drawer { position: fixed; inset: 0 0 0 auto; width: min(460px, 100%); background: var(--panel);
+  border-left: 1px solid var(--line); transform: translateX(100%); transition: transform .2s;
+  z-index: 10; display: flex; flex-direction: column; }
+#drawer.open { transform: none; }
+#drawer .body { overflow-y: auto; padding: 12px 16px 40px; flex: 1; }
+#drawer h3 { font: 600 13px system-ui, sans-serif; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
+#drawer li { margin: 3px 0; }
+#drawer a { color: var(--accent); cursor: pointer; }
+pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button id="back" class="hidden" title="Campaigns">←</button>
+    <h1 id="title">RPG LLM</h1>
+    <button id="themeBtn" title="Theme">◐</button>
+    <button id="archiveBtn" class="hidden">Archive</button>
+  </header>
+  <main id="main"><div class="wrap" id="view"></div></main>
+  <footer id="footer" class="hidden">
+    <div id="statusline" class="ui muted"></div>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="What do you do?"></textarea>
+      <button id="send" class="primary">Send</button>
+    </div>
+  </footer>
+</div>
+<aside id="drawer">
+  <header><h1>Archive</h1><button id="closeDrawer">✕</button></header>
+  <div class="body ui" id="drawerBody"></div>
+</aside>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let S = { slug: null, data: null, busy: false, shown: 150, poll: null };
+
+// ---- theme ---------------------------------------------------------------
+(function () {
+  let t = null; try { t = localStorage.getItem("theme"); } catch {}
+  if (t) document.documentElement.dataset.theme = t;
+})();
+$("themeBtn").onclick = () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch {}
+};
+
+// ---- tiny markdown -------------------------------------------------------
+function md(src) {
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/(^|\W)_([^_\n]+)_(?=\W|$)/g, "$1<em>$2</em>");
+  const out = []; let list = null;
+  const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (const block of String(src || "").split(/\n{2,}/)) {
+    const lines = block.split("\n");
+    if (lines.every(l => /^\s*([-*]|\d+\.)\s+/.test(l))) {
+      const type = /^\s*\d+\./.test(lines[0]) ? "ol" : "ul";
+      if (list !== type) { close(); out.push(`<${type}>`); list = type; }
+      for (const l of lines) out.push(`<li>${inline(l.replace(/^\s*([-*]|\d+\.)\s+/, ""))}</li>`);
+      continue;
+    }
+    close();
+    const h = block.match(/^(#{1,3})\s+(.*)$/);
+    if (h && lines.length === 1) out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`);
+    else if (/^(-{3,}|\*{3,})$/.test(block.trim())) out.push("<hr>");
+    else out.push(`<p>${lines.map(inline).join("<br>")}</p>`);
+  }
+  close();
+  return out.join("");
+}
+
+// ---- api -----------------------------------------------------------------
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+
+async function streamPost(path, body, handlers) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (line.startsWith("data: ")) { const ev = JSON.parse(line.slice(6)); handlers[ev.type]?.(ev); }
+    }
+  }
+}
+
+// ---- campaign list -------------------------------------------------------
+async function showList() {
+  S.slug = null; clearInterval(S.poll);
+  history.replaceState(null, "", "/");
+  $("title").textContent = "Campaigns";
+  ["back", "archiveBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
+  const list = await api("/api/campaigns");
+  $("view").innerHTML = `
+    ${list.map(c => `<div class="card link" data-slug="${esc(c.slug)}">
+        <strong>${esc(c.name)}</strong>
+        <div class="ui muted">${esc(c.system || "")}${c.last_activity ? " · last played " + new Date(c.last_activity * 1000).toLocaleString() : " · not started"}</div>
+      </div>`).join("") || '<p class="muted ui">No campaigns yet.</p>'}
+    <div class="card ui">
+      <strong>New campaign</strong>
+      <label>Name</label><input id="nName" placeholder="Traveller: The Spinward Run">
+      <label>Game system / setting</label><input id="nSystem" placeholder="Traveller (Mongoose 2e), Third Imperium">
+      <label>Premise: setting, your character, where the story starts</label>
+      <textarea id="nPremise" rows="6"></textarea>
+      <label>Extra GM instructions (tone, style, anything else)</label>
+      <textarea id="nExtra" rows="3" placeholder="Gritty and grounded. Keep replies under 250 words."></textarea>
+      <p><button class="primary" id="create">Create</button></p>
+    </div>`;
+  document.querySelectorAll(".card.link").forEach(el => el.onclick = () => openCampaign(el.dataset.slug));
+  $("create").onclick = async () => {
+    const name = $("nName").value.trim(); if (!name) return $("nName").focus();
+    const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
+      name, system: $("nSystem").value, premise: $("nPremise").value, dm_instructions: $("nExtra").value }) });
+    openCampaign(slug);
+  };
+}
+
+// ---- chat ----------------------------------------------------------------
+async function openCampaign(slug) {
+  S.slug = slug; S.shown = 150;
+  history.replaceState(null, "", "/?c=" + encodeURIComponent(slug));
+  S.data = await api(`/api/campaigns/${slug}`);
+  $("title").textContent = S.data.meta.name;
+  ["back", "archiveBtn", "footer"].forEach(id => $(id).classList.remove("hidden"));
+  renderChat(true);
+  updateStatus(S.data.status, S.data.scenes);
+  startPoll();
+}
+
+function sceneFor(id) {
+  let sc = null;
+  for (const s of S.data.scenes) if (id >= s.start) sc = s;
+  return sc;
+}
+
+function msgHTML(m, isLastUser, isLastGm) {
+  if (m.role === "user") {
+    return `<div class="msg user" data-id="${m.id}">${md(m.content)}
+      ${isLastUser && !S.busy ? `<div class="meta actions"><button data-act="edit">Edit</button></div>` : ""}</div>`;
+  }
+  const chips = [];
+  if (m.injected?.length) chips.push(`<span class="chip" title="${esc(m.injected.join(", "))}">📜 ${m.injected.length} from archive</span>`);
+  if (m.tools?.length) chips.push(`<span class="chip" title="${esc(m.tools.map(t => t.tool + " " + t.arguments).join("\n"))}">🔎 ${m.tools.length} lookup${m.tools.length > 1 ? "s" : ""}</span>`);
+  return `<div class="msg assistant" data-id="${m.id}">
+    ${m.reasoning ? `<details class="think"><summary>thinking</summary><div>${esc(m.reasoning)}</div></details>` : ""}
+    <div class="body">${md(m.content)}</div>
+    <div class="meta">${chips.join("")}${isLastGm && !S.busy ? `<span class="actions"><button data-act="regen">↻ Regenerate</button></span>` : ""}</div>
+  </div>`;
+}
+
+function renderChat(scroll) {
+  const msgs = S.data.messages;
+  const start = Math.max(0, msgs.length - S.shown);
+  const lastUser = [...msgs].reverse().find(m => m.role === "user");
+  const last = msgs[msgs.length - 1];
+  let html = start > 0 ? `<button id="more" class="ui">Show earlier (${start})</button>` : "";
+  if (!msgs.length) html += `<div class="card ui muted">${md(S.data.meta.premise || "")}<p>Describe your first move to begin.</p></div>`;
+  let curScene = null, open = false;
+  for (const m of msgs.slice(start)) {
+    const sc = sceneFor(m.id);
+    if (sc && sc !== curScene) {
+      if (open) html += "</div>";
+      curScene = sc;
+      const tag = sc.status === "compacted" ? " · filed" : sc.status === "closed_provisional" ? " · closed" : "";
+      html += `<div class="divider">Scene ${sc.id}${sc.title ? " · " + esc(sc.title) : ""}${sc.location ? " · " + esc(sc.location) : ""}${tag}</div>`;
+      html += `<div class="${sc.status === "compacted" ? "filed" : ""}">`; open = true;
+    }
+    html += msgHTML(m, m === lastUser, m === last && m.role === "assistant");
+  }
+  if (open) html += "</div>";
+  $("view").innerHTML = html;
+  $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
+  $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
+  $("view").querySelectorAll("[data-act=edit]").forEach(b => b.onclick = () => editLast(lastUser));
+  if (scroll) $("main").scrollTop = $("main").scrollHeight;
+}
+
+function setBusy(b) {
+  S.busy = b; $("send").disabled = b;
+  $("send").textContent = b ? "…" : "Send";
+}
+
+async function runTurn(path, body, optimisticUser) {
+  if (S.busy) return;
+  setBusy(true);
+  if (optimisticUser) S.data.messages.push({ id: Infinity, role: "user", content: optimisticUser });
+  renderChat(true);
+  const box = document.createElement("div");
+  box.className = "msg assistant";
+  box.innerHTML = `<details class="think hidden"><summary>thinking…</summary><div></div></details><div class="body"><span class="muted ui">…</span></div><div class="meta"></div>`;
+  $("view").appendChild(box);
+  $("main").scrollTop = $("main").scrollHeight;
+  let text = "", think = "";
+  const nearBottom = () => $("main").scrollHeight - $("main").scrollTop - $("main").clientHeight < 120;
+  try {
+    await streamPost(path, body, {
+      status: (e) => { $("statusline").textContent = e.text; },
+      context: (e) => {
+        const n = (e.injected || []).length;
+        $("statusline").textContent = n ? `archive: ${n} note${n > 1 ? "s" : ""} added (${e.seconds}s)` : "";
+      },
+      reasoning: (e) => {
+        const d = box.querySelector(".think"); d.classList.remove("hidden");
+        think += e.text; d.querySelector("div").textContent = think;
+      },
+      content: (e) => {
+        const stick = nearBottom();
+        text += e.text; box.querySelector(".body").innerHTML = md(text);
+        box.querySelector(".think summary").textContent = "thinking";
+        if (stick) $("main").scrollTop = $("main").scrollHeight;
+      },
+      tool: (e) => { $("statusline").textContent = `GM is checking the archive: ${e.name} ${e.arguments}`; },
+      error: (e) => { throw new Error(e.text); },
+      done: () => {},
+    });
+  } catch (err) {
+    $("statusline").innerHTML = `<span class="error">Error: ${esc(err.message)}</span>`;
+  }
+  S.data = await api(`/api/campaigns/${S.slug}`);
+  setBusy(false);
+  renderChat(nearBottom());
+  startPoll();
+}
+
+function send() {
+  const text = $("input").value.trim();
+  if (!text || S.busy) return;
+  $("input").value = ""; autosize();
+  runTurn(`/api/campaigns/${S.slug}/chat`, { content: text }, text);
+}
+function regenerate() {
+  S.data.messages = S.data.messages.slice(0, -1);
+  runTurn(`/api/campaigns/${S.slug}/regenerate`, null);
+}
+function editLast(m) {
+  const el = $("view").querySelector(`.msg.user[data-id="${m.id}"]`);
+  el.innerHTML = `<textarea rows="4">${esc(m.content)}</textarea>
+    <div class="meta actions"><button class="primary" data-act="save">Resend</button><button data-act="cancel">Cancel</button></div>`;
+  el.querySelector("textarea").focus();
+  el.querySelector("[data-act=cancel]").onclick = () => renderChat(false);
+  el.querySelector("[data-act=save]").onclick = () => {
+    const content = el.querySelector("textarea").value.trim(); if (!content) return;
+    const i = S.data.messages.indexOf(m);
+    S.data.messages = S.data.messages.slice(0, i);
+    runTurn(`/api/campaigns/${S.slug}/edit`, { content }, content);
+  };
+}
+
+// ---- status polling ------------------------------------------------------
+function updateStatus(st, scenes) {
+  if (S.busy) return;
+  const cur = scenes[scenes.length - 1];
+  const bits = [`Scene ${cur.id}${cur.location ? " · " + cur.location : ""}`];
+  if (st.tracking) bits.push("archivist reading…");
+  else if (st.last_verdict && Date.now() / 1000 - st.last_verdict.at < 60)
+    bits.push(st.last_verdict.transition ? `scene change? ${Math.round(st.last_verdict.confidence * 100)}%` : "same scene");
+  if (st.compacting) bits.push("filing old scenes…");
+  if (st.error) bits.push(`⚠ ${st.error}`);
+  $("statusline").textContent = bits.join(" · ");
+}
+function startPoll() {
+  clearInterval(S.poll);
+  let n = 0;
+  S.poll = setInterval(async () => {
+    if (!S.slug || S.busy) return;
+    try {
+      const st = await api(`/api/campaigns/${S.slug}/status`);
+      const changed = JSON.stringify(st.scenes) !== JSON.stringify(S.data.scenes);
+      S.data.scenes = st.scenes; S.data.status = st;
+      updateStatus(st, st.scenes);
+      if (changed) renderChat(false);
+      if (!st.tracking && !st.compacting && ++n > 6) clearInterval(S.poll);
+    } catch {}
+  }, 3000);
+}
+
+// ---- archive drawer ------------------------------------------------------
+async function openDrawer() {
+  $("drawer").classList.add("open");
+  const st = await api(`/api/campaigns/${S.slug}/status`);
+  const gz = await api(`/api/campaigns/${S.slug}/file?path=gazetteer.yaml`);
+  const ctx = st.last_context;
+  $("drawerBody").innerHTML = `
+    <h3>Campaign brief</h3><a data-path="brief.md">brief.md</a> · <a data-path="timeline.md">timeline.md</a> · <a data-path="gazetteer.yaml">gazetteer.yaml</a>
+    <h3>Scenes</h3><ol>${st.scenes.map(s => `<li>${s.note ? `<a data-path="${esc(s.note)}">${esc(s.title || "untitled")}</a>` : esc(s.title || "(in progress)")}
+      <span class="muted">${esc(s.location || "")} · ${s.status}${s.confidence ? ` · ${Math.round(s.confidence * 100)}%` : ""}</span></li>`).join("")}</ol>
+    <p><button id="compactNow">File closed scenes now</button> <span class="muted">normally automatic after ${esc("idle")}</span></p>
+    <h3>Last turn: from the archive</h3>
+    ${ctx ? `<div class="muted">${ctx.seconds}s · names matched: ${esc((ctx.alias_hits || []).join(", ") || "none")}<br>router: ${esc(typeof ctx.router === "object" && ctx.router ? ctx.router.reason : ctx.router || "off")}</div>
+      ${ctx.notes ? `<pre class="file">${esc(ctx.notes)}</pre>` : "<p class='muted'>nothing added</p>"}` : "<p class='muted'>no turn yet</p>"}
+    <h3>Last scene check</h3>
+    ${st.last_verdict ? `<div class="muted">${st.last_verdict.transition ? "new scene" : "same scene"} · ${Math.round(st.last_verdict.confidence * 100)}% · ${esc(st.last_verdict.reason)}</div>` : "<p class='muted'>none yet</p>"}
+    ${st.last_compaction ? `<h3>Last filing</h3><pre class="file">${esc(JSON.stringify(st.last_compaction, null, 2))}</pre>` : ""}
+    <h3>Wiki (${st.gazetteer_size} entries)</h3><div id="gz"></div>
+    <div id="fileView"></div>`;
+  const entries = (gz.text.match(/path: .+/g) || []).map(l => l.slice(6).trim());
+  $("gz").innerHTML = entries.map(p => `<a data-path="${esc(p)}">${esc(p)}</a>`).join("<br>") || "<span class='muted'>empty until the first scene is filed</span>";
+  $("drawerBody").querySelectorAll("a[data-path]").forEach(a => a.onclick = async () => {
+    const f = await api(`/api/campaigns/${S.slug}/file?path=${encodeURIComponent(a.dataset.path)}`);
+    $("fileView").innerHTML = `<h3>${esc(f.path)}</h3><pre class="file">${esc(f.text)}</pre>`;
+    $("fileView").scrollIntoView({ behavior: "smooth" });
+  });
+  $("compactNow").onclick = async () => {
+    $("compactNow").disabled = true; $("compactNow").textContent = "Filing… (can take a few minutes)";
+    try { await api(`/api/campaigns/${S.slug}/compact`, { method: "POST" }); }
+    catch (e) { alert(e.message); }
+    S.data = await api(`/api/campaigns/${S.slug}`); renderChat(false); openDrawer();
+  };
+}
+
+// ---- wiring --------------------------------------------------------------
+function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; }
+$("input").addEventListener("input", autosize);
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); send(); }
+});
+$("send").onclick = send;
+$("back").onclick = showList;
+$("archiveBtn").onclick = openDrawer;
+$("closeDrawer").onclick = () => $("drawer").classList.remove("open");
+const q = new URLSearchParams(location.search).get("c");
+q ? openCampaign(q).catch(showList) : showList();
+</script>
+</body>
+</html>

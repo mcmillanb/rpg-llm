@@ -40,7 +40,10 @@ class Settings(BaseSettings):
     live_tail_pct: float = 50.0
     router_threshold: float = 0.7
     gatekeeper_enabled: bool = True
+    gatekeeper_timeout: float = 30.0
     idle_compact_hours: float = 6.0
+    host: str = "0.0.0.0"
+    port: int = 8700
 
     @property
     def dm(self) -> ModelSlot:
