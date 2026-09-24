@@ -109,6 +109,12 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
 .sheet a { color: var(--accent); cursor: pointer; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+@media (max-width: 620px) { .two { grid-template-columns: 1fr; } }
+.rolls { margin: 0 0 10px; display: flex; flex-direction: column; gap: 4px; }
+.roll { font: 13px/1.4 system-ui, sans-serif; padding: 5px 10px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line); }
+.roll.ok { border-left: 3px solid #3c8d4a; } .roll.fail { border-left: 3px solid var(--warn); }
 .histnav { display: inline-flex; gap: 6px; align-items: center; }
 .histnav button { padding: 4px 9px; }
 label.check input { width: auto; }
@@ -262,6 +268,16 @@ function openNewCampaign() {
     </div>
     <label>Extra GM instructions <span class="muted">(optional)</span></label>
     <textarea id="nExtra" rows="2" placeholder="Gritty and grounded. Keep replies under 250 words."></textarea>
+    <div class="two">
+      <div><label>Consequences</label><select id="nConseq">
+        <option value="low">Low-stakes: cinematic, no lasting harm</option>
+        <option value="normal" selected>Normal: real setbacks, death only if reckless</option>
+        <option value="brutal">Brutal: failure, loss and death when earned</option></select></div>
+      <div><label>Dice</label><select id="nDice">
+        <option value="auto" selected>Rolled for me, shown in the story</option>
+        <option value="manual">I roll my own dice</option>
+        <option value="none">No dice: pure narrative</option></select></div>
+    </div>
     <label class="check"><input type="checkbox" id="nRewind"> Allow rewinds: let me edit my last move or re-roll the GM's reply after seeing it</label>
     <div class="muted small">Off keeps outcomes final, like a real table. You can always take a message back while the GM is still replying (Esc).</div>
     <div class="row-actions"><button class="primary" id="create">Create campaign</button><button id="nCancel">Cancel</button></div>
@@ -284,7 +300,7 @@ function openNewCampaign() {
     const name = $("nName").value.trim(); if (!name) return $("nName").focus();
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
       name, system: chosenSystem(), premise: $("nPremise").value, dm_instructions: $("nExtra").value,
-      allow_rewind: $("nRewind").checked }) });
+      allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value }) });
     NEW = { seed: "", history: [], at: -1 };
     close(); openCampaign(slug);
   };
@@ -386,6 +402,13 @@ function lastTurnFailed() {
 }
 function canEditLast() { return S.data.can_rewind || lastTurnFailed(); }
 
+function rollHTML(r) {
+  const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
+  const res = "target" in r ? ` vs ${r.target}${r.success_if === "at_most" ? "−" : "+"} ${r.success ? "✓ success" : "✗ failure"}` : "";
+  return `<div class="roll ${"success" in r ? (r.success ? "ok" : "fail") : ""}">🎲 <strong>${esc(r.reason || "Roll")}</strong> · ${esc(r.dice)}: ${r.rolls.join(" + ")}${mod} = <strong>${r.total}</strong>${res}</div>`;
+}
+function rollsHTML(rolls) { return rolls?.length ? `<div class="rolls">${rolls.map(rollHTML).join("")}</div>` : ""; }
+
 function msgHTML(m, isLastUser, isLastGm) {
   if (m.role === "user") {
     const unanswered = S.data.messages[S.data.messages.length - 1] === m;
@@ -411,6 +434,7 @@ function msgHTML(m, isLastUser, isLastGm) {
   if (m.tools?.length) chips.push(`<span class="chip" title="${esc(m.tools.map(t => t.tool + " " + t.arguments).join("\n"))}">🔎 ${m.tools.length} lookup${m.tools.length > 1 ? "s" : ""}</span>`);
   return `<div class="msg assistant" data-id="${m.id}">
     ${m.reasoning ? `<details class="think"><summary>thinking</summary><div>${esc(m.reasoning)}</div></details>` : ""}
+    ${rollsHTML(m.rolls)}
     <div class="body">${md(m.content)}</div>
     <div class="meta">${chips.join("")}${isLastGm && !S.busy && (!m.content.trim() || S.data.can_rewind) ? `<span class="actions"><button data-act="regen" title="${m.content.trim() ? "Rewind: ask the GM again for this turn" : "Retry this turn"}">↻ ${m.content.trim() ? "Re-roll" : "Retry"}</button></span>` : ""}</div>
   </div>`;
@@ -477,7 +501,7 @@ async function runTurn(path, body, optimisticUser, kind = "chat") {
   renderChat(true);
   const box = document.createElement("div");
   box.className = "msg assistant";
-  box.innerHTML = `<details class="think hidden"><summary>thinking…</summary><div></div></details><div class="body"><span class="muted ui">…</span></div><div class="meta"></div>`;
+  box.innerHTML = `<details class="think hidden"><summary>thinking…</summary><div></div></details><div class="rolls hidden"></div><div class="body"><span class="muted ui">…</span></div><div class="meta"></div>`;
   $("view").appendChild(box);
   $("main").scrollTop = $("main").scrollHeight;
   let text = "", think = "";
@@ -500,6 +524,7 @@ async function runTurn(path, body, optimisticUser, kind = "chat") {
         if (stick) $("main").scrollTop = $("main").scrollHeight;
       },
       tool: (e) => { $("statusline").textContent = `GM is checking the archive: ${e.name} ${e.arguments}`; },
+      roll: (e) => { const rb = box.querySelector(".rolls"); rb.classList.remove("hidden"); rb.insertAdjacentHTML("beforeend", rollHTML(e)); },
       error: (e) => { throw new Error(e.text); },
       done: () => {},
     }, S.abort.signal);

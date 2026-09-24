@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import admin, compactor, context, router, suggest, wiki
+from rpg_llm import admin, compactor, context, dice, router, suggest, wiki
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -186,7 +186,11 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
         state = c.load_state()
 
     convo = context.build(c, state, messages, notes)
-    kwargs = {"tools": wiki.TOOLS} if c.gazetteer() else {}  # nothing to look up yet
+    tools = list(wiki.TOOLS) if c.gazetteer() else []  # nothing to look up yet
+    if context.table(c.meta)["dice"] == "auto":
+        tools.append(dice.TOOL)
+    kwargs = {"tools": tools} if tools else {}
+    rolls = []
     if not rt.settings.app.dm.thinking:
         kwargs["extra_body"] = NO_THINKING
     content, reasoning, trace = "", "", []
@@ -222,9 +226,20 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
              "function": {"name": tc["name"], "arguments": tc["arguments"]}}
             for i, tc in enumerate(calls)]})
         for i, tc in enumerate(calls):
-            result = wiki.run_tool(c, tc["name"], tc["arguments"])
+            if tc["name"] == "roll_dice":
+                try:
+                    args = json.loads(tc["arguments"] or "{}")
+                    r = dice.roll(str(args.get("dice", "")), str(args.get("reason", "")),
+                                  args.get("target"), args.get("success_if") or "at_least")
+                    rolls.append(r)
+                    result = dice.describe(r)
+                    yield sse({"type": "roll", **r})
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    result = f"Error: {e}"
+            else:
+                result = wiki.run_tool(c, tc["name"], tc["arguments"])
+                yield sse({"type": "tool", "name": tc["name"], "arguments": tc["arguments"]})
             trace.append({"tool": tc["name"], "arguments": tc["arguments"], "result": result[:2000]})
-            yield sse({"type": "tool", "name": tc["name"], "arguments": tc["arguments"]})
             convo.append({"role": "tool", "tool_call_id": tc["id"] or f"call_{i}", "content": result})
 
     stats["seconds"] = round(time.time() - t_dm, 1)
@@ -237,6 +252,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
              "stats": stats}
     if trace:
         entry["tools"] = trace
+    if rolls:
+        entry["rolls"] = rolls
     if supersedes:
         entry["supersedes"] = supersedes
     if info.get("injected"):
@@ -272,6 +289,8 @@ class NewCampaign(BaseModel):
     premise: str = ""
     dm_instructions: str = ""
     allow_rewind: bool = False
+    consequences: str = "normal"
+    dice: str = "auto"
 
 
 class PremiseAsk(BaseModel):
@@ -335,7 +354,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns")
     async def create_campaign(body: NewCampaign):
         c = R().vault.create(body.name, body.premise, body.system, body.dm_instructions)
-        c.save_meta({**c.meta, "allow_rewind": body.allow_rewind})
+        t = context.table({"consequences": body.consequences, "dice": body.dice})
+        c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t})
         return {"slug": c.slug}
 
     @app.delete("/api/campaigns/{slug}")
@@ -365,6 +385,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         rt.touch(slug)
         state = c.load_state()
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
+                "table": context.table(c.meta),
                 "messages": c.messages(),
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
                 "status": rt.st(c.slug)}

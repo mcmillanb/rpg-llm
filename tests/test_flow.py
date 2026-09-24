@@ -471,3 +471,45 @@ def test_delete_from_play_page_moves_to_trash(tmp_path):
         assert client.delete(f"/api/campaigns/{slug}").status_code == 200
         assert client.get("/api/campaigns").json() == []
         assert (tmp_path / "trash").exists()
+
+# ---- table rules & dice -----------------------------------------------------
+
+def test_dice_roll_and_description():
+    from rpg_llm import dice
+    for _ in range(200):
+        r = dice.roll("2D6+1", "spot the tail", 8)
+        assert 3 <= r["total"] <= 13 and len(r["rolls"]) == 2 and r["success"] == (r["total"] >= 8)
+    r = dice.roll("d%", "library use", 45, "at_most")
+    assert 1 <= r["total"] <= 100 and r["dice"] == "1D100"
+    assert "Needed 45 or less" in dice.describe(r)
+    with pytest.raises(ValueError):
+        dice.roll("two dice")
+    with pytest.raises(ValueError):
+        dice.roll("500d6")
+
+
+def test_table_settings_reach_the_prompt_and_old_campaigns_get_no_dice(vault):
+    c = vault.create("Old")
+    assert context.table(c.meta) == {"consequences": "normal", "dice": "none"}
+    c.save_meta({**c.meta, "consequences": "brutal", "dice": "auto"})
+    sp = context.system_prompt(c, c.load_state())
+    assert "BRUTAL" in sp and "roll_dice" in sp
+
+
+def test_auto_dice_turn_rolls_real_dice_and_records_them(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[
+        [{"tool_calls": [{"id": "1", "name": "roll_dice",
+                          "arguments": '{"dice": "2D6", "reason": "sneak", "target": 8}'}]}],
+        [{"content": "You slip past."}],
+    ])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)]), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "dice": "auto"}).json()["slug"]
+        events = sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "I sneak"}))
+        roll = next(e for e in events if e["type"] == "roll")
+        assert roll["reason"] == "sneak" and 2 <= roll["total"] <= 12
+        assert any(t["function"]["name"] == "roll_dice" for t in dm.calls[0][2]["tools"])
+        assert "Narrate from this result" in dm.calls[1][1][-1]["content"]
+        msg = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]
+        assert msg["rolls"][0]["total"] == roll["total"]

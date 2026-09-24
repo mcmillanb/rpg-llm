@@ -8,14 +8,32 @@ from rpg_llm import prompts
 from rpg_llm.vault import Campaign, State, estimate_tokens
 
 
+CONSEQUENCES = ("brutal", "normal", "low")
+DICE_MODES = ("auto", "manual", "none")
+
+
+def table(meta: dict) -> dict:
+    """A campaign's table settings with defaults. Campaigns from before dice existed default to
+    no dice, so an ongoing story doesn't suddenly start rolling."""
+    c = meta.get("consequences")
+    d = meta.get("dice")
+    return {"consequences": c if c in CONSEQUENCES else "normal",
+            "dice": d if d in DICE_MODES else "none"}
+
+
 def system_prompt(campaign: Campaign, state: State) -> str:
     meta = campaign.meta
     system = meta.get("system") or ""
     extra = meta.get("dm_instructions") or ""
+    t = table(meta)
+    arc = campaign.read("arc.md").strip()
     text = prompts.DM_SYSTEM.format(
         system_line=f"\nGame system / setting: {system}\n" if system else "",
         extra=f"\nAdditional instructions from the player:\n{extra}\n" if extra else "",
+        table_rules=prompts.CONSEQUENCES[t["consequences"]] + "\n\n" + prompts.DICE[t["dice"]],
         brief=campaign.brief.strip() or "(nothing yet)",
+        arc=(f"\n# Story arc (GM only: guidance, not a script; never reveal it)\n\n{arc}\n"
+             if arc else ""),
     )
     if state.fold:
         text += f"\n# Earlier in this session (condensed)\n\n{state.fold['summary']}\n"

@@ -373,6 +373,10 @@ async function loadCampaigns() {
           <div><label>Game system / setting</label><input data-f="system" value="${esc(c.system)}"></div></div>
         <label>Premise</label><textarea data-f="premise" rows="4">${esc(c.premise)}</textarea>
         <label>Extra GM instructions</label><textarea data-f="dm_instructions" rows="3">${esc(c.dm_instructions)}</textarea>
+        <div class="row"><div><label>Consequences</label><select data-f="consequences">
+            ${[["low", "Low-stakes"], ["normal", "Normal"], ["brutal", "Brutal"]].map(([v, t]) => `<option value="${v}" ${c.consequences === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+          <div><label>Dice</label><select data-f="dice">
+            ${[["auto", "Rolled by the app, shown"], ["manual", "Player rolls"], ["none", "No dice"]].map(([v, t]) => `<option value="${v}" ${c.dice === v ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
         <label class="inline" style="margin-top:10px"><input type="checkbox" data-f="allow_rewind" ${c.allow_rewind ? "checked" : ""}>
           Allow rewinds (edit the last move or re-roll the GM's reply after seeing it)</label>
         <div class="actions"><button class="primary" data-act="saveEdit">Save campaign</button></div>

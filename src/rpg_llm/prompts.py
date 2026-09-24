@@ -23,10 +23,39 @@ Memory:
   ("broker", "cargo", "the bar") or anything already in front of you, and never look up things
   you are introducing for the first time.
 {system_line}{extra}
+# Table rules
+
+{table_rules}
+
 # Campaign brief
 
 {brief}
-"""
+{arc}"""
+
+CONSEQUENCES = {
+    "brutal": """Consequences are BRUTAL. The world does not protect the player character. Bad plans, bad luck
+and bad odds lead to real failure: lasting injuries, lost gear and money, lost allies, and death
+when the story earns it. Never soften an outcome or rescue the character with a coincidence. Be
+fair: signal danger clearly so the player can make informed choices.""",
+    "normal": """Consequences are REAL but not punishing. Failure and setbacks happen and stick (injuries,
+losses, complications, enemies made), but the character only dies after clearly reckless
+choices, and there is usually a way to recover from a bad turn.""",
+    "low": """Consequences are LOW-STAKES. Keep it cinematic and fun: failures create complications and
+colour rather than lasting harm, and the character will not die.""",
+}
+
+DICE = {
+    "auto": """Dice: when the outcome of an action is genuinely uncertain and matters, call the roll_dice tool
+before narrating it, using dice that fit the game (2D6 for Traveller-style checks, d20 for d20
+systems, d100 for percentile systems) with a modifier and target that suit the character and the
+difficulty. Narrate from the result it returns; never invent or assume a roll. Don't roll for
+routine actions. The player sees every roll.""",
+    "manual": """Dice: the player rolls their own dice. When an outcome is uncertain and matters, tell the player
+what to roll and what they need (for example "Roll 2D6+1: you need 8 or more"), then stop and
+wait for their result before narrating what happens. Never roll for them or assume a result.""",
+    "none": """Dice: this game uses no dice. Decide outcomes from the fiction, the character's abilities and
+the stakes, fairly and without favouring the player.""",
+}
 
 ROUTER_SYSTEM = """\
 You are the archivist for a solo role-playing campaign run by an AI game master. You keep the
