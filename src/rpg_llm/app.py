@@ -20,6 +20,8 @@ from rpg_llm.vault import Campaign, Vault
 log = logging.getLogger("rpg_llm")
 STATIC = Path(__file__).parent / "static"
 MAX_TOOL_ROUNDS = 5
+QUIET_SECONDS = 180  # background filing waits until the player has been quiet this long
+QUIET_POLL = 5
 
 
 class Runtime:
@@ -32,6 +34,8 @@ class Runtime:
         self.locks: dict[str, asyncio.Lock] = {}
         self.status: dict[str, dict] = {}
         self.jobs: dict[str, dict] = {}  # admin jobs: imports, wiki rebuilds
+        self.seen: dict[str, float] = {}  # last time the player's browser touched a campaign
+        self.turns: dict[str, int] = {}  # turns in progress per campaign
         self.tasks: set[asyncio.Task] = set()
         self.reload()
 
@@ -90,17 +94,33 @@ class Runtime:
         finally:
             st["tracking"] = False
 
+    def touch(self, slug: str) -> None:
+        self.seen[slug] = time.time()
+
+    def player_active(self, slug: str) -> bool:
+        return self.turns.get(slug, 0) > 0 or time.time() - self.seen.get(slug, 0) < QUIET_SECONDS
+
+    async def wait_until_quiet(self, slug: str) -> None:
+        """Background filing never competes with play: hold off while a turn is running or
+        the player has been active in the last few minutes."""
+        while self.player_active(slug):
+            await asyncio.sleep(QUIET_POLL)
+
     def needs_compaction(self, c: Campaign) -> bool:
         state = c.load_state()
         return any(s.status == "closed_provisional" for s in state.scenes[:-1])
 
-    async def run_compact(self, c: Campaign) -> dict | None:
+    async def run_compact(self, c: Campaign, background: bool = False) -> dict | None:
+        """background=True (idle filing) pauses whenever the player is active; a filing the
+        player asked for runs straight through."""
         st = self.st(c.slug)
         if st["compacting"]:
             return None
         st["compacting"] = True
         try:
-            report = await compactor.compact(c, self.router, self.archiver, self.lock(c.slug))
+            pause = (lambda: self.wait_until_quiet(c.slug)) if background else None
+            report = await compactor.compact(c, self.router, self.archiver, self.lock(c.slug),
+                                             pause)
             st["last_compaction"] = {**report, "at": time.time()}
             return report
         except Exception as e:
@@ -111,15 +131,18 @@ class Runtime:
             st["compacting"] = False
 
     def maybe_compact_idle(self, c: Campaign) -> None:
+        """Start background filing once play has stopped for the idle time and nobody is at
+        the campaign right now (opening it after a long break doesn't trigger it at once)."""
         last = c.last_activity()
         hours = self.settings.tuning.idle_compact_hours
         idle = last is not None and time.time() - last > hours * 3600
-        if idle and not self.st(c.slug)["compacting"] and self.needs_compaction(c):
-            self.spawn(self.run_compact(c))
+        if (idle and not self.player_active(c.slug) and not self.st(c.slug)["compacting"]
+                and self.needs_compaction(c)):
+            self.spawn(self.run_compact(c, background=True))
 
     async def idle_loop(self) -> None:
         while True:
-            await asyncio.sleep(300)
+            await asyncio.sleep(60)
             if not self.configured:
                 continue
             for c in self.vault.campaigns():
@@ -218,12 +241,18 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
 
 def stream_turn(rt: Runtime, c: Campaign, supersedes: list[int] | None = None) -> StreamingResponse:
     async def gen():
+        rt.turns[c.slug] = rt.turns.get(c.slug, 0) + 1
         try:
             async for chunk in play_turn(rt, c, supersedes or []):
                 yield chunk
         except Exception as e:
             log.exception("turn failed")
             yield sse({"type": "error", "text": str(e)})
+        finally:
+            rt.turns[c.slug] -= 1
+            rt.touch(c.slug)
+
+    rt.touch(c.slug)
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -284,8 +313,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def get_campaign(slug: str):
         rt = R()
         c = rt.campaign(slug)
-        if rt.configured:
-            rt.maybe_compact_idle(c)  # resuming after a long gap files the old scenes
+        rt.touch(slug)
         state = c.load_state()
         return {"slug": c.slug, "meta": c.meta, "messages": c.messages(),
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
@@ -294,6 +322,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.get("/api/campaigns/{slug}/status")
     async def get_status(slug: str):
         rt = R()
+        rt.touch(slug)
         c = rt.campaign(slug)
         state = c.load_state()
         return {**rt.st(slug), "scenes": [vars(s) for s in state.scenes],

@@ -10,7 +10,8 @@ campaign wiki (an Obsidian-style markdown vault) and gives the GM only what it n
   notes, including indirect references ("the loan shark back home"). The GM can also look things
   up itself with wiki tools.
 - **After each reply,** in the background: the router decides whether the scene has changed.
-- **When you've been idle** (6 hours by default): finished scenes are filed into the wiki as
+- **When you've been idle** (6 hours by default, and not at the campaign for a few minutes;
+  it pauses if you start playing): finished scenes are filed into the wiki as
   scene notes, location and NPC notes, a timeline and an updated brief. The current scene is
   never touched. The raw transcript is never edited, so the wiki can always be rebuilt.
 

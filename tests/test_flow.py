@@ -376,3 +376,39 @@ def test_delete_moves_campaign_to_trash(tmp_path):
         assert client.delete(f"/api/admin/campaigns/{slug}").status_code == 200
         assert client.get("/api/campaigns").json() == []
         assert len(list((tmp_path / "trash").iterdir())) == 1
+
+
+# ---- background filing vs play ------------------------------------------------
+
+async def test_background_filing_waits_for_the_player(tmp_path, monkeypatch):
+    import rpg_llm.app as app_mod
+
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(idle_compact_hours=0))),
+                 dm=FakeLLM(), router_llm=FakeLLM(), archiver=FakeLLM())
+    c = rt.vault.create("T")
+    play(c, ("a", "A"), ("b", "B"))
+    c.save_state(State(scenes=[Scene(1, 1, "closed_provisional", audited=True),
+                               Scene(2, 3, audited=True)]))
+
+    rt.touch(c.slug)  # the player just opened the campaign
+    rt.maybe_compact_idle(c)
+    assert not rt.st(c.slug)["compacting"]  # doesn't start while they're there
+
+    calls = []
+
+    async def fake_compact(campaign, router_llm, archiver, lock, pause=None):
+        await pause()
+        calls.append("filed")
+        return {"filed": [], "seconds": 0}
+
+    monkeypatch.setattr(app_mod.compactor, "compact", fake_compact)
+    monkeypatch.setattr(app_mod, "QUIET_SECONDS", 0.05)
+    monkeypatch.setattr(app_mod, "QUIET_POLL", 0.01)
+    rt.turns[c.slug] = 1  # a turn is running: filing must hold off
+    task = asyncio.create_task(rt.run_compact(c, background=True))
+    await asyncio.sleep(0.1)
+    assert calls == []
+    rt.turns[c.slug] = 0
+    rt.seen[c.slug] = 0
+    await asyncio.wait_for(task, 10)
+    assert calls == ["filed"]

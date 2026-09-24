@@ -135,18 +135,28 @@ async def rewrite_brief(campaign: Campaign, archiver: LLMClient, filed: list[dic
         campaign.write("brief.md", text + "\n")
 
 
+async def _no_pause() -> None:
+    return None
+
+
 async def compact(campaign: Campaign, router_llm: LLMClient, archiver: LLMClient,
-                  lock: asyncio.Lock) -> dict:
+                  lock: asyncio.Lock, pause=None) -> dict:
+    """`pause`, if given, is awaited before each model call so background filing can wait
+    while the player is active (it returns once they've gone quiet)."""
+    pause = pause or _no_pause
     report: dict = {"started": time.time()}
+    await pause()
     async with lock:
         report["audit"] = await router.audit(campaign, router_llm)
     state = campaign.load_state()
     todo = [s.id for s in state.scenes[:-1] if s.status == "closed_provisional"]
     filed = []
     for sid in todo:
+        await pause()
         log.info("filing %s scene %s", campaign.slug, sid)
         filed.append(await file_scene(campaign, archiver, campaign.load_state(), sid, lock))
     if filed:
+        await pause()
         await rewrite_brief(campaign, archiver, filed)
     async with lock:
         state = campaign.load_state()
