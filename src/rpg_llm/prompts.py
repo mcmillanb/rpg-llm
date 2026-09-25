@@ -15,8 +15,10 @@ How to run the game:
 Memory:
 - Only the campaign brief and the current stretch of play are in front of you. Earlier events
   are filed in the campaign wiki.
-- Player messages may start with a [GM NOTES] block the player cannot see: wiki extracts the
-  archivist thinks are relevant. Use them silently; never mention the notes or the wiki.
+- Player messages may start with a [GM NOTES] block the player cannot see: the player
+  character's current sheet (money, gear, injuries, companions, debts) and wiki extracts the
+  archivist thinks are relevant. Keep to the sheet (the character can't spend money or use gear
+  they don't have) and use the notes silently; never mention the notes, sheet or wiki.
 - If the player refers to a specific named person, place, deal, or past event from EARLIER in
   the campaign that is not in the brief, the notes, or the conversation, look it up with the
   wiki tools before answering rather than inventing a contradiction. Never look up generic words
@@ -248,3 +250,46 @@ Cover, in 120-180 words of plain prose (no headings, no lists):
 - an immediate hook or problem that pulls them into the adventure
 
 Leave room for the player: don't decide what they do next. Write only the premise."""
+
+SHEET_TASK = """\
+Task: keep the player character's sheet up to date. Apply only concrete changes that the LATEST
+exchange actually establishes (in the GM's narration, or stated by the player and not refused):
+money spent or earned, items gained, lost, used up or broken, injuries or conditions gained or
+healed, companions joining or leaving, assets (ships, vehicles, property) gained or damaged,
+debts, promises and enemies made or settled, and newly shown skills. Ignore plans, offers not
+yet accepted, and anything that only might happen. Keep every entry short (a few words, with
+numbers where known: "Cr 1,200", "medkit (2 uses)", "cracked rib"). Remove what no longer
+applies. Leave the rest of the sheet exactly as it is.
+
+Money is the amount the character has now. If it isn't known, never invent a starting amount or
+go negative: write e.g. "unknown (spent Cr 295 so far)". List in "changes" only things that
+actually changed, never "no change" or "+0".
+
+Fields: name, concept (one line: who they are), skills, condition (injuries, fatigue, status
+effects; empty if fine), money, gear, assets, companions, obligations (debts, promises, enemies,
+deadlines).
+
+Current sheet:
+{sheet}
+
+Latest exchange:
+{exchange}
+
+Return JSON: changes (list of short descriptions of what changed, empty if nothing), changed
+(bool), sheet (the full updated sheet)."""
+
+SHEET_START_TASK = """\
+Create the player character's starting sheet for a new solo campaign, from the premise and the
+game. Fill in sensible, concrete starting values that fit both: money as an amount in the
+setting's currency, a handful of useful gear, skills matching the concept, any ship, vehicle or
+property the premise mentions, companions and obligations (debts, enemies, deadlines) the
+premise sets up. Keep entries short. Don't invent companions or assets the premise doesn't
+imply.
+
+Game / setting: {system}
+
+Premise:
+{premise}
+
+Return JSON with the fields: name, concept, skills, condition (empty unless the premise says
+otherwise), money, gear, assets, companions, obligations."""

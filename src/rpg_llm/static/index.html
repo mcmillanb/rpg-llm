@@ -128,6 +128,7 @@ label.check input { width: auto; }
     <button id="newBtn" class="primary hidden">+ New campaign</button>
     <button id="themeBtn" title="Light / dark">☾</button>
     <a href="/admin" title="Settings"><button>⚙</button></a>
+    <button id="sheetBtn" class="hidden">Sheet</button>
     <button id="archiveBtn" class="hidden">Archive</button>
   </header>
   <main id="main"><div class="wrap" id="view"></div></main>
@@ -143,7 +144,7 @@ label.check input { width: auto; }
 </div>
 <div id="modal" class="hidden"></div>
 <aside id="drawer">
-  <header><h1>Archive</h1><button id="closeDrawer">✕</button></header>
+  <header><h1 id="drawerTitle">Archive</h1><button id="closeDrawer">✕</button></header>
   <div class="body ui" id="drawerBody"></div>
 </aside>
 
@@ -225,7 +226,7 @@ async function showList() {
   S.slug = null; clearInterval(S.poll);
   history.replaceState(null, "", "/");
   $("title").textContent = "Campaigns";
-  ["back", "archiveBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
+  ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
   $("newBtn").classList.remove("hidden");
   const list = await api("/api/campaigns");
   $("view").innerHTML = list.map(c => `<div class="card link game" data-slug="${esc(c.slug)}">
@@ -381,7 +382,7 @@ async function openCampaign(slug) {
   history.replaceState(null, "", "/?c=" + encodeURIComponent(slug));
   S.data = await api(`/api/campaigns/${slug}`);
   $("title").textContent = S.data.meta.name;
-  ["back", "archiveBtn", "footer"].forEach(id => $(id).classList.remove("hidden"));
+  ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.remove("hidden"));
   $("newBtn").classList.add("hidden");
   renderChat(true);
   updateStatus(S.data.status, S.data.scenes);
@@ -600,6 +601,11 @@ function updateStatus(st, scenes) {
   else if (st.last_verdict && Date.now() / 1000 - st.last_verdict.at < 60)
     bits.push(st.last_verdict.transition ? `scene change? ${Math.round(st.last_verdict.confidence * 100)}%` : "same scene");
   if (st.compacting) bits.push("filing old scenes…");
+  if (st.last_sheet && Date.now() / 1000 - st.last_sheet.at < 90) bits.push(`📝 sheet: ${st.last_sheet.changes.join("; ")}`);
+  if (st.last_sheet && st.last_sheet.at !== S.sheetSeen) {
+    S.sheetSeen = st.last_sheet.at;
+    if ($("drawer").classList.contains("open") && $("drawerTitle").textContent === "Character") openSheet();
+  }
   if (st.error) bits.push(`⚠ ${st.error}`);
   $("statusline").textContent = bits.join(" · ");
 }
@@ -620,7 +626,36 @@ function startPoll() {
 }
 
 // ---- archive drawer ------------------------------------------------------
+// ---- character sheet --------------------------------------------------------
+const SHEET_LABELS = { name: "Name", concept: "Concept", skills: "Skills", condition: "Condition (injuries, status)",
+  money: "Money", gear: "Gear", assets: "Assets (ships, vehicles, property)", companions: "Companions",
+  obligations: "Obligations (debts, promises, enemies)" };
+async function openSheet() {
+  $("drawerTitle").textContent = "Character";
+  $("drawer").classList.add("open");
+  const d = await api(`/api/campaigns/${S.slug}/character`);
+  const sh = d.sheet || {};
+  $("drawerBody").innerHTML = `
+    ${d.sheet ? "" : `<p class="muted">No sheet yet: the archivist starts one after the GM's first reply, or fill it in yourself.</p>`}
+    ${d.fields.map(f => d.lists.includes(f)
+      ? `<label>${SHEET_LABELS[f] || f} <span class="muted">(one per line)</span></label><textarea data-f="${f}" rows="${Math.max(2, (sh[f] || []).length + 1)}">${esc((sh[f] || []).join("\n"))}</textarea>`
+      : `<label>${SHEET_LABELS[f] || f}</label><input data-f="${f}" value="${esc(sh[f] || "")}">`).join("")}
+    <p><button class="primary" id="saveSheet">Save sheet</button> <span id="sheetMsg" class="muted"></span></p>
+    <h3>Recent changes</h3>
+    ${d.history.length ? `<ul>${d.history.map(h => `<li>${esc(h.what)} <span class="muted">· ${new Date(h.ts * 1000).toLocaleString()}</span></li>`).join("")}</ul>` : `<p class="muted">none yet</p>`}
+    <p class="muted">The archivist updates this after each GM reply (money, gear, injuries, companions, debts). The GM sees it every turn and keeps to it.</p>`;
+  $("saveSheet").onclick = async () => {
+    const body = {};
+    $("drawerBody").querySelectorAll("[data-f]").forEach(el => {
+      body[el.dataset.f] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.value;
+    });
+    try { await api(`/api/campaigns/${S.slug}/character`, { method: "PUT", body: JSON.stringify(body) }); openSheet(); }
+    catch (e) { $("sheetMsg").textContent = e.message; }
+  };
+}
+
 async function openDrawer() {
+  $("drawerTitle").textContent = "Archive";
   $("drawer").classList.add("open");
   const st = await api(`/api/campaigns/${S.slug}/status`);
   const gz = await api(`/api/campaigns/${S.slug}/file?path=gazetteer.yaml`);
@@ -669,6 +704,7 @@ $("send").onclick = send;
 $("back").onclick = showList;
 $("newBtn").onclick = openNewCampaign;
 $("archiveBtn").onclick = openDrawer;
+$("sheetBtn").onclick = openSheet;
 $("closeDrawer").onclick = () => $("drawer").classList.remove("open");
 (async () => {
   try {

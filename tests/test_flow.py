@@ -513,3 +513,47 @@ def test_auto_dice_turn_rolls_real_dice_and_records_them(tmp_path):
         assert "Narrate from this result" in dm.calls[1][1][-1]["content"]
         msg = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]
         assert msg["rolls"][0]["total"] == roll["total"]
+
+
+# ---- character sheet --------------------------------------------------------
+
+def sheet_reply(changed=True, **fields):
+    from rpg_llm import sheet
+    s = {**sheet.blank(), "name": "Mara", "money": "Cr 500", **fields}
+    return {"changes": ["spent Cr 100"] if changed else [], "changed": changed, "sheet": s}
+
+
+async def test_sheet_updates_rewinds_and_reaches_the_gm(vault):
+    from rpg_llm import sheet
+    c = vault.create("T")
+    play(c, ("I buy a medkit", "The trader hands it over."))
+    assert await sheet.update(c, FakeLLM([sheet_reply(gear=["medkit"])]), "sys")
+    assert sheet.load(c)["gear"] == ["medkit"]
+    # nothing changed: no new version
+    play(c, ("I look around", "Quiet."))
+    assert await sheet.update(c, FakeLLM([sheet_reply(changed=False, gear=["medkit"])]), "sys") is None
+    assert len(sheet.history(c)) == 1
+    play(c, ("I sell the medkit", "Sold."))
+    await sheet.update(c, FakeLLM([sheet_reply(money="Cr 600")]), "sys")
+    assert sheet.load(c)["gear"] == [] and sheet.load(c)["money"] == "Cr 600"
+    # taking back the last exchange restores the sheet from before it
+    assert sheet.rewind(c, 5)
+    assert sheet.load(c)["gear"] == ["medkit"] and sheet.load(c)["money"] == "Cr 500"
+    block = sheet.notes_block(sheet.load(c))
+    assert "Money: Cr 500" in block and "Gear: medkit" in block
+
+
+def test_player_can_edit_the_sheet_and_it_rides_in_gm_notes(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[[{"content": "Noted."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        r = client.put(f"/api/campaigns/{slug}/character",
+                       json={"name": "Mara", "money": "Cr 50", "gear": ["knife", ""], "bogus": 1})
+        assert r.json()["sheet"]["gear"] == ["knife"] and "bogus" not in r.json()["sheet"]
+        client.post(f"/api/campaigns/{slug}/chat", json={"content": "hi"})
+        last = dm.calls[0][1][-1]["content"]
+        assert last.startswith("[GM NOTES]") and "Money: Cr 50" in last
+        h = client.get(f"/api/campaigns/{slug}/character").json()["history"]
+        assert h[0]["what"] == "edited by the player"

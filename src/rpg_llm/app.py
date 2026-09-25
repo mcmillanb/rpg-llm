@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import admin, compactor, context, dice, router, suggest, wiki
+from rpg_llm import admin, compactor, context, dice, router, sheet, suggest, wiki
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -64,6 +64,7 @@ class Runtime:
 
     def st(self, slug: str) -> dict:
         return self.status.setdefault(slug, {"tracking": False, "compacting": False,
+                                             "last_sheet": None,
                                              "last_verdict": None, "last_compaction": None,
                                              "last_context": None, "error": None})
 
@@ -88,6 +89,11 @@ class Runtime:
                 v = await router.track(c, self.router, self.settings.tuning.router_threshold)
             if v is not None:
                 st["last_verdict"] = {**v, "at": time.time()}
+            async with self.lock(c.slug):
+                changed = await sheet.update(c, self.router,
+                                             router.router_system(c, c.load_state()))
+            if changed:
+                st["last_sheet"] = {**changed, "at": time.time()}
         except Exception as e:
             log.exception("scene tracking failed")
             st["error"] = f"scene tracking: {e}"
@@ -105,6 +111,13 @@ class Runtime:
         the player has been active in the last few minutes."""
         while self.player_active(slug):
             await asyncio.sleep(QUIET_POLL)
+
+    async def run_quietly(self, coro, what: str):
+        """Background setup work (starting sheet, story arc): log failures, never raise."""
+        try:
+            return await coro
+        except Exception:
+            log.exception("%s failed", what)
 
     def needs_compaction(self, c: Campaign) -> bool:
         state = c.load_state()
@@ -173,6 +186,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     notes, info = await router.gatekeep(c, gate_router, user["content"], last_reply,
                                         rt.settings.tuning.gatekeeper_timeout)
     info["seconds"] = round(time.time() - t0, 1)
+    notes = "\n\n".join(p for p in (sheet.notes_block(sheet.load(c)), notes) if p) or None
     info["notes"] = notes
     st["last_context"] = info
     yield sse({"type": "context", **info})
@@ -356,6 +370,9 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         c = R().vault.create(body.name, body.premise, body.system, body.dm_instructions)
         t = context.table({"consequences": body.consequences, "dice": body.dice})
         c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t})
+        rt = R()
+        if rt.configured and body.premise.strip():
+            rt.spawn(rt.run_quietly(sheet.create_start(c, rt.archiver), "starting sheet"))
         return {"slug": c.slug}
 
     @app.delete("/api/campaigns/{slug}")
@@ -432,6 +449,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         dead = [msgs[-1]["id"]] if msgs[-1]["role"] == "assistant" else []
         user = msgs[-2] if dead else msgs[-1]
         router.undo_scenes_from(c, user["id"])
+        sheet.rewind(c, user["id"])
         if dead:
             # hide the old reply immediately; the new one also records what it replaced
             c.append({"role": "system", "content": "", "supersedes": dead})
@@ -450,8 +468,25 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(403, NO_REWIND)
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
+        sheet.rewind(c, last_user["id"])
         c.append({"role": "user", "content": body.content.strip(), "supersedes": dead})
         return stream_turn(rt, c)
+
+    @app.get("/api/campaigns/{slug}/character")
+    async def get_character(slug: str):
+        c = R().campaign(slug)
+        return {"sheet": sheet.load(c), "fields": list(sheet.FIELDS), "lists": list(sheet.LISTS),
+                "history": [{k: h[k] for k in ("after", "ts", "what")}
+                            for h in sheet.history(c)[-10:]][::-1]}
+
+    @app.put("/api/campaigns/{slug}/character")
+    async def put_character(slug: str, body: dict):
+        rt = R()
+        c = rt.campaign(slug)
+        msgs = c.messages()
+        async with rt.lock(slug):
+            saved = sheet.save(c, body, msgs[-1]["id"] if msgs else 0, "edited by the player")
+        return {"sheet": saved}
 
     @app.post("/api/campaigns/{slug}/unsend")
     async def unsend(slug: str):
@@ -468,6 +503,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(409, "Too late: the GM had already replied.")
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
+        sheet.rewind(c, last_user["id"])
         c.append({"role": "system", "content": "", "supersedes": dead, "unsent": True})
         return {"content": last_user["content"]}
 
