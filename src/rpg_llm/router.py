@@ -9,7 +9,7 @@ import asyncio
 import logging
 import re
 
-from rpg_llm import prompts, wiki
+from rpg_llm import prompts, themes, wiki
 from rpg_llm.llm import LLMClient
 from rpg_llm.vault import Campaign, Scene, State, estimate_tokens
 
@@ -86,11 +86,22 @@ async def _verdict(campaign: Campaign, router: LLMClient, state: State, messages
         f"{'>>> LATEST ' if m['id'] >= user_id else ''}"
         f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {_clip(m['content'], 1500)}"
         for m in recent)
+    kinds = themes.settings(campaign.meta.get("theme") or "")
+    schema = TRACK_SCHEMA
+    setting_line = ""
+    if kinds:  # also tag the kind of place, for the play page's backdrop
+        schema = {**TRACK_SCHEMA,
+                  "properties": {**TRACK_SCHEMA["properties"],
+                                 "setting": {"type": "string", "enum": [*kinds, "unknown"]}},
+                  "required": [*TRACK_SCHEMA["required"], "setting"]}
+        setting_line = ("\n- setting: which of these best describes where the characters are at "
+                        f"the end of the latest GM reply: {', '.join(kinds)} (or unknown)")
     verdict = await router.json(
         [{"role": "system", "content": router_system(campaign, state)},
          {"role": "user", "content": prompts.TRACK_TASK.format(
-             location=current.location or "unknown", recent=recent_text)}],
-        TRACK_SCHEMA, max_tokens=400)
+             location=current.location or "unknown", recent=recent_text,
+             setting_line=setting_line)}],
+        schema, max_tokens=400)
     reply = upto[-1]["content"] if upto and upto[-1]["role"] == "assistant" else ""
     overrule = None
     if verdict.get("transition"):
@@ -171,11 +182,19 @@ def _apply(state: State, verdict: dict, user_id: int, threshold: float) -> bool:
         ending.title = ending.title or verdict.get("scene_title")
         state.scenes.append(Scene(
             id=ending.id + 1, start=user_id, location=verdict.get("new_location"),
-            confidence=verdict.get("confidence"), reason=verdict.get("reason")))
+            setting=_setting(verdict), confidence=verdict.get("confidence"),
+            reason=verdict.get("reason")))
         return True
     if not state.current.location and verdict.get("location_now"):
         state.current.location = verdict["location_now"]
+    if not state.current.setting and _setting(verdict):
+        state.current.setting = _setting(verdict)
     return False
+
+
+def _setting(verdict: dict) -> str | None:
+    s = verdict.get("setting")
+    return s if s and s != "unknown" else None
 
 
 async def track(campaign: Campaign, router: LLMClient, threshold: float) -> dict | None:
@@ -187,7 +206,8 @@ async def track(campaign: Campaign, router: LLMClient, threshold: float) -> dict
         return None
     user_msg = messages[-2]
     opening = user_msg["id"] <= state.current.start  # this exchange opened the current scene
-    if opening and state.current.location:
+    needs_setting = bool(themes.settings(campaign.meta.get("theme") or "")) and not state.current.setting
+    if opening and state.current.location and not needs_setting:
         return None
     verdict = await _verdict(campaign, router, state, messages, len(messages) - 2)
     if opening:  # only learn where the scene is; it can't end on its first exchange

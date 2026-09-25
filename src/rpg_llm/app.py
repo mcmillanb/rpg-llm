@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import admin, arc, compactor, context, dice, router, sheet, suggest, wiki
+from rpg_llm import admin, arc, compactor, context, dice, router, sheet, suggest, themes, wiki
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -340,6 +340,8 @@ class NewCampaign(BaseModel):
     allow_rewind: bool = False
     consequences: str = "normal"
     dice: str = "auto"
+    theme: str = "auto"  # "auto" picks from the system and genre
+    genre: str = ""
 
 
 class PremiseAsk(BaseModel):
@@ -404,7 +406,9 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def create_campaign(body: NewCampaign):
         c = R().vault.create(body.name, body.premise, body.system, body.dm_instructions)
         t = context.table({"consequences": body.consequences, "dice": body.dice})
-        c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t})
+        theme = body.theme if body.theme in themes.THEMES or body.theme == themes.PLAIN \
+            else themes.default_for(body.system, body.genre)
+        c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t, "theme": theme})
         rt = R()
         if rt.configured:
             async def setup():
@@ -421,6 +425,10 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         if rt.st(slug)["compacting"] or rt.turns.get(slug):
             raise HTTPException(409, "the campaign is busy; try again in a moment")
         return {"ok": True, "moved_to": str(rt.vault.trash(c))}
+
+    @app.get("/api/themes")
+    async def list_themes():
+        return {**{k: v["label"] for k, v in themes.public().items()}, "plain": "Plain"}
 
     @app.get("/api/suggest/systems")
     async def suggest_systems(refresh: bool = False):
@@ -442,6 +450,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         state = c.load_state()
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
                 "table": context.table(c.meta),
+                "theme": c.meta.get("theme") or themes.default_for(c.meta.get("system") or ""),
+                "themes": themes.public(),
                 "messages": c.messages(),
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
                 "status": rt.st(c.slug)}

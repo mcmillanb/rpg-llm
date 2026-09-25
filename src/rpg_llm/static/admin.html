@@ -385,7 +385,9 @@ $("save").onclick = async () => {
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 // ---- campaigns ---------------------------------------------------------------
+let THEMES = {};
 async function loadCampaigns() {
+  THEMES = await api("/api/admin/themes");
   const list = await api("/api/admin/campaigns");
   $("campaigns").innerHTML = list.map(c => `
     <div class="card" data-slug="${esc(c.slug)}">
@@ -401,6 +403,7 @@ async function loadCampaigns() {
             ${[["low", "Low-stakes"], ["normal", "Normal"], ["brutal", "Brutal"]].map(([v, t]) => `<option value="${v}" ${c.consequences === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
           <div><label>Dice</label><select data-f="dice">
             ${[["auto", "Rolled by the app, shown"], ["manual", "Player rolls"], ["none", "No dice"]].map(([v, t]) => `<option value="${v}" ${c.dice === v ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
+        <label>Look</label><select data-f="theme">${Object.entries(THEMES).map(([v, t]) => `<option value="${v}" ${c.theme === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
         <label class="inline" style="margin-top:10px"><input type="checkbox" data-f="allow_rewind" ${c.allow_rewind ? "checked" : ""}>
           Allow rewinds (edit the last move or re-roll the GM's reply after seeing it)</label>
         <div class="actions"><button class="primary" data-act="saveEdit">Save campaign</button></div>

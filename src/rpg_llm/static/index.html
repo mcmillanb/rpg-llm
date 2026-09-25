@@ -33,6 +33,7 @@ button:disabled { opacity: .5; cursor: default; }
 .muted { color: var(--muted); }
 header { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header a { color: inherit; text-decoration: none; }
 header h1 { font-size: 17px; margin: 0; flex: 1; min-width: 0; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 #app { display: flex; flex-direction: column; height: 100%; }
@@ -95,6 +96,41 @@ footer { border-top: 1px solid var(--line); background: var(--panel);
 pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
 .hidden { display: none !important; }
+
+/* ---- themed play page: painted backdrop per genre and setting ---------------------------- */
+.backdrop, .backdrop-shade { position: fixed; inset: 0; z-index: 0; pointer-events: none; display: none; }
+.backdrop { background: center / cover no-repeat; opacity: 0; transition: opacity 1.6s ease; }
+.backdrop.on { opacity: 1; }
+.backdrop-shade { background: linear-gradient(to right, rgba(0,0,0,.05), rgba(0,0,0,.5) 14%,
+  rgba(0,0,0,.62) 50%, rgba(0,0,0,.5) 86%, rgba(0,0,0,.05)); }
+@media (max-width: 900px) { .backdrop-shade { background: rgba(0,0,0,.6); } }
+@media (prefers-reduced-motion: reduce) { .backdrop { transition: none; } }
+body[data-look] .backdrop, body[data-look] .backdrop-shade { display: block; }
+body[data-look] { background: #000; }
+body[data-look] #app { position: relative; z-index: 1; }
+body[data-look] header, body[data-look] footer { background: var(--chrome); backdrop-filter: blur(6px); }
+body[data-look] .msg { box-shadow: 0 2px 18px rgba(0,0,0,.35); }
+body[data-look] h1, body[data-look] .divider { font-family: var(--display); }
+body[data-look="scifi"] {
+  --bg: #070b14; --panel: rgba(12,18,32,.9); --chrome: rgba(8,12,22,.82); --ink: #dfe6f0;
+  --muted: #8d9ab0; --line: rgba(130,160,210,.2); --accent: #6fb7e8; --accent-ink: #04121c;
+  --player: rgba(24,40,66,.9); --gm: rgba(10,16,28,.88); --warn: #f28b82;
+  --display: "Exo 2", system-ui, sans-serif; }
+body[data-look="fantasy"] {
+  --bg: #0e0c08; --panel: rgba(28,24,16,.9); --chrome: rgba(20,17,11,.84); --ink: #ece3cf;
+  --muted: #a89a7c; --line: rgba(200,170,110,.22); --accent: #d4a24c; --accent-ink: #1b1408;
+  --player: rgba(46,40,26,.9); --gm: rgba(22,19,12,.88); --warn: #f08a6a;
+  --display: "Cinzel", Georgia, serif; }
+body[data-look="horror"] {
+  --bg: #070707; --panel: rgba(16,15,14,.9); --chrome: rgba(10,10,10,.85); --ink: #e6e0d4;
+  --muted: #9a9387; --line: rgba(220,210,190,.15); --accent: #c0544a; --accent-ink: #fff;
+  --player: rgba(36,32,30,.9); --gm: rgba(12,11,10,.89); --warn: #f07a7a;
+  --display: "IM Fell English", Georgia, serif; }
+body[data-look="cyberpunk"] {
+  --bg: #05030a; --panel: rgba(14,8,24,.88); --chrome: rgba(8,4,16,.82); --ink: #e8e6f5;
+  --muted: #a39ac0; --line: rgba(255,60,200,.22); --accent: #ff3cb4; --accent-ink: #12030c;
+  --player: rgba(30,14,48,.9); --gm: rgba(10,6,18,.87); --warn: #ff8a8a;
+  --display: "Share Tech Mono", ui-monospace, monospace; }
 .game { display: flex; align-items: center; gap: 12px; }
 .game .gameinfo { flex: 1; min-width: 0; }
 .game .del { border: 0; background: transparent; opacity: .45; font-size: 16px; }
@@ -121,6 +157,7 @@ label.check input { width: auto; }
 </style>
 </head>
 <body>
+<div class="backdrop" id="bdA"></div><div class="backdrop" id="bdB"></div><div class="backdrop-shade"></div>
 <div id="app">
   <header>
     <button id="back" class="hidden" title="Campaigns">←</button>
@@ -227,6 +264,7 @@ async function showList() {
   history.replaceState(null, "", "/");
   $("title").textContent = "Campaigns";
   ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
+  setLook(null);
   $("newBtn").classList.remove("hidden");
   const list = await api("/api/campaigns");
   $("view").innerHTML = list.map(c => `<div class="card link game" data-slug="${esc(c.slug)}">
@@ -279,6 +317,7 @@ function openNewCampaign() {
         <option value="manual">I roll my own dice</option>
         <option value="none">No dice: pure narrative</option></select></div>
     </div>
+    <label>Look</label><select id="nLook"><option value="auto">Match the game system</option></select>
     <label class="check"><input type="checkbox" id="nRewind"> Allow rewinds: let me edit my last move or re-roll the GM's reply after seeing it</label>
     <div class="muted small">Off keeps outcomes final, like a real table. You can always take a message back while the GM is still replying (Esc).</div>
     <div class="row-actions"><button class="primary" id="create">Create campaign</button><button id="nCancel">Cancel</button></div>
@@ -289,6 +328,7 @@ function openNewCampaign() {
   $("nClose").onclick = close; $("nCancel").onclick = close;
   $("modal").onclick = (e) => { if (e.target === $("modal")) close(); };
   loadSystems(false);
+  api("/api/themes").then(t => { $("nLook").innerHTML += Object.entries(t).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join(""); }).catch(() => {});
   $("nRefresh").onclick = () => loadSystems(true);
   $("nSystemPick").onchange = systemChanged;
   $("nSuggest").onclick = () => suggestPremise(true);
@@ -301,7 +341,8 @@ function openNewCampaign() {
     const name = $("nName").value.trim(); if (!name) return $("nName").focus();
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
       name, system: chosenSystem(), premise: $("nPremise").value, dm_instructions: $("nExtra").value,
-      allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value }) });
+      allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value,
+      theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "" }) });
     NEW = { seed: "", history: [], at: -1 };
     close(); openCampaign(slug);
   };
@@ -384,6 +425,7 @@ async function openCampaign(slug) {
   $("title").textContent = S.data.meta.name;
   ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.remove("hidden"));
   $("newBtn").classList.add("hidden");
+  setLook(S.data.theme);
   renderChat(true);
   updateStatus(S.data.status, S.data.scenes);
   startPoll();
@@ -441,6 +483,41 @@ function msgHTML(m, isLastUser, isLastGm) {
   </div>`;
 }
 
+// ---- looks & backdrops ----------------------------------------------------------------
+const FONTS = { scifi: "Exo+2:wght@500", fantasy: "Cinzel:wght@500", horror: "IM+Fell+English", cyberpunk: "Share+Tech+Mono" };
+let LOOK = { theme: null, url: null, front: "bdA" };
+function setLook(theme) {
+  const themed = theme && S.data?.themes?.[theme];
+  if (!themed) { delete document.body.dataset.look; LOOK = { theme: null, url: null, front: "bdA" };
+    ["bdA", "bdB"].forEach(id => { $(id).classList.remove("on"); $(id).style.backgroundImage = ""; }); return; }
+  document.body.dataset.look = theme;
+  if (FONTS[theme] && !document.getElementById("font-" + theme)) {
+    const l = document.createElement("link"); l.id = "font-" + theme; l.rel = "stylesheet";
+    l.href = `https://fonts.googleapis.com/css2?family=${FONTS[theme]}&display=swap`;
+    document.head.appendChild(l);
+  }
+  LOOK.theme = theme;
+  updateBackdrop();
+}
+function updateBackdrop() {
+  if (!LOOK.theme || !S.data) return;
+  const kinds = S.data.themes[LOOK.theme].settings;
+  const cur = S.data.scenes[S.data.scenes.length - 1];
+  const setting = kinds.includes(cur?.setting) ? cur.setting : kinds[0];
+  const url = `/static/backdrops/${LOOK.theme}/${setting}.webp`;
+  if (url === LOOK.url) return;
+  LOOK.url = url;
+  const img = new Image();
+  img.onload = () => {
+    if (LOOK.url !== url) return;  // superseded while loading
+    const back = LOOK.front === "bdA" ? "bdB" : "bdA";
+    $(back).style.backgroundImage = `url("${url}")`;
+    $(back).classList.add("on"); $(LOOK.front).classList.remove("on");
+    LOOK.front = back;
+  };
+  img.src = url;
+}
+
 function renderChat(scroll) {
   const msgs = S.data.messages;
   const start = Math.max(0, msgs.length - S.shown);
@@ -462,6 +539,7 @@ function renderChat(scroll) {
   }
   if (open) html += "</div>";
   $("view").innerHTML = html;
+  updateBackdrop();
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
   $("view").querySelectorAll("[data-act=retry]").forEach(b => b.onclick = () => runTurn(`/api/campaigns/${S.slug}/regenerate`, null, null, "regenerate"));

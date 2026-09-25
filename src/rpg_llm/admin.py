@@ -12,7 +12,7 @@ import httpx2
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from rpg_llm import arc, compactor, context, router
+from rpg_llm import arc, compactor, context, router, themes
 from rpg_llm.config import ROLES, AppConfig, NotConfigured, Role, Server, Tuning
 from rpg_llm.importers import openwebui
 from rpg_llm.llm import LLMClient
@@ -53,6 +53,7 @@ class CampaignEdit(BaseModel):
     allow_rewind: bool = False
     consequences: str = "normal"
     dice: str = "none"
+    theme: str = "plain"
 
 
 class ImportIn(BaseModel):
@@ -246,6 +247,10 @@ def register(app: FastAPI, R) -> None:
 
     # ---- campaigns ------------------------------------------------------------
 
+    @app.get("/api/admin/themes", dependencies=auth)
+    async def list_themes():
+        return {"plain": "Plain", **{k: v["label"] for k, v in themes.public().items()}}
+
     @app.get("/api/admin/campaigns", dependencies=auth)
     async def campaigns():
         rt = R()
@@ -256,6 +261,7 @@ def register(app: FastAPI, R) -> None:
                 "slug": c.slug, **{k: c.meta.get(k, "") for k in
                                    ("name", "system", "premise", "dm_instructions")},
                 "allow_rewind": bool(c.meta.get("allow_rewind")), **context.table(c.meta),
+                "theme": c.meta.get("theme") or themes.default_for(c.meta.get("system") or ""),
                 "messages": len(c.messages()), "scenes": len(state.scenes),
                 "filed": sum(s.status == "compacted" for s in state.scenes),
                 "wiki_entries": len(c.gazetteer()), "last_activity": c.last_activity(),
@@ -268,6 +274,8 @@ def register(app: FastAPI, R) -> None:
         c = R().campaign(slug)
         meta = {**c.meta, **body.model_dump()}
         meta.update(context.table(meta))  # normalise unknown values
+        if meta.get("theme") not in (*themes.THEMES, themes.PLAIN):
+            meta["theme"] = themes.PLAIN
         c.save_meta(meta)
         if not any(s.status == "compacted" for s in c.load_state().scenes):
             # nothing filed yet, so the brief is still just the premise: keep it in step

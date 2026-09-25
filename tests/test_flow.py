@@ -638,3 +638,26 @@ async def test_long_tail_is_condensed_in_the_background_after_a_reply(tmp_path):
     state = c.load_state()
     assert state.fold and state.fold["summary"] == "Condensed."
     assert context.tail_tokens(c, state, c.messages()) < 0.8 * await rt.tail_budget()
+
+
+# ---- themes -----------------------------------------------------------------
+
+def test_theme_defaults_from_system_and_genre():
+    from rpg_llm import themes
+    assert themes.default_for("Traveller (Third Imperium)") == "scifi"
+    assert themes.default_for("Call of Cthulhu (7th Edition)", "Horror") == "horror"
+    assert themes.default_for("Shadowrun (6th Edition)") == "cyberpunk"
+    assert themes.default_for("Dungeons & Dragons (5th Edition)") == "fantasy"
+    assert themes.default_for("Paranoia") == "plain"
+    assert all(len(t["settings"]) == 5 for t in themes.THEMES.values())
+
+
+async def test_tracker_tags_the_setting_for_themed_campaigns(vault):
+    c = vault.create("T")
+    c.save_meta({**c.meta, "theme": "scifi"})
+    play(c, ("a", "A"), ("we lift off", "You arrive at the ship."))
+    llm = FakeLLM([{**verdict(True, 0.9, "orbit"), "setting": "orbit"}])
+    await router.track(c, llm, threshold=0.7)
+    assert c.load_state().current.setting == "orbit"
+    enum = llm.calls[0][1][1]["content"]
+    assert "space, orbit, planet, settlement, interior" in enum

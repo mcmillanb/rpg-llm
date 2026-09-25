@@ -123,7 +123,7 @@ Return JSON:
 - confidence: 0-1, how sure you are of your answer
 - new_location: location_now if transition, else null
 - scene_title: 3-6 word title describing what happened in the scene that is ENDING, or null if
-  no transition"""
+  no transition{setting_line}"""
 
 GATEKEEP_TASK = """\
 Task: decide whether the game master needs anything from the archive to answer the player's

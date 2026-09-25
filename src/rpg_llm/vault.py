@@ -23,6 +23,7 @@ class Scene:
     start: int  # first transcript id in the scene
     status: str = "open"  # open | closed_provisional | compacted
     location: str | None = None
+    setting: str | None = None  # the theme's kind of place (space, town, crypt…) for the backdrop
     title: str | None = None
     confidence: float | None = None  # router verdict that opened this scene
     reason: str | None = None
