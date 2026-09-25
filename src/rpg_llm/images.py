@@ -20,9 +20,10 @@ from rpg_llm.config import ImageGen
 
 NEGATIVE = ("text, letters, watermark, logo, signature, frame, border, extra fingers, "
             "deformed face, blurry")
-PORTRAIT_STYLE = ("Head-and-shoulders character portrait, {look}, painterly illustration, "
-                  "dramatic soft lighting, dark muted background, looking slightly off-camera, "
-                  "no text. {prompt}")
+PORTRAIT_STYLE = ("Head-and-shoulders character portrait, {look}, painterly illustration. The face "
+                  "is brightly and clearly lit with warm key light and a soft rim light, rich "
+                  "vibrant natural colours, crisp detail, a colourful softly blurred background "
+                  "from their world, looking slightly off-camera, no text. {prompt}")
 LOOKS = {"scifi": "science-fiction", "fantasy": "fantasy", "horror": "gothic 1920s horror",
          "cyberpunk": "neon cyberpunk", "plain": "tabletop role-playing game"}
 
