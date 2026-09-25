@@ -20,10 +20,17 @@ from rpg_llm.config import ImageGen
 
 NEGATIVE = ("text, letters, watermark, logo, signature, frame, border, extra fingers, "
             "deformed face, blurry")
-PORTRAIT_STYLE = ("Head-and-shoulders character portrait, {look}, painterly illustration. The face "
-                  "is brightly and clearly lit with warm key light and a soft rim light, rich "
-                  "vibrant natural colours, crisp detail, a colourful softly blurred background "
-                  "from their world, looking slightly off-camera, no text. {prompt}")
+PORTRAIT_STYLE = ("Head-and-shoulders character portrait, {look}, painterly illustration. {light} "
+                  "Crisp detail, looking slightly off-camera, no text. {prompt}")
+# Lighting per look: moodier for horror, but the face always stays clearly visible.
+LIGHT = {
+    "horror": "The face is clearly lit by warm candle or lamp light with deep but readable "
+              "shadows, atmospheric colour, a dim softly blurred background from their world.",
+    "cyberpunk": "The face is vividly lit by magenta and cyan neon, rich saturated colour, a "
+                 "glowing softly blurred city background.",
+}
+BRIGHT = ("The face is brightly and clearly lit with warm key light and a soft rim light, rich "
+          "vibrant natural colours, a colourful softly blurred background from their world.")
 LOOKS = {"scifi": "science-fiction", "fantasy": "fantasy", "horror": "gothic 1920s horror",
          "cyberpunk": "neon cyberpunk", "plain": "tabletop role-playing game"}
 
@@ -118,4 +125,5 @@ async def generate(cfg: ImageGen, prompt: str, width: int = 512, height: int = 5
 
 
 def portrait_prompt(look: str, prompt: str) -> str:
-    return PORTRAIT_STYLE.format(look=LOOKS.get(look, LOOKS["plain"]), prompt=prompt)
+    return PORTRAIT_STYLE.format(look=LOOKS.get(look, LOOKS["plain"]), light=LIGHT.get(look, BRIGHT),
+                                 prompt=prompt)
