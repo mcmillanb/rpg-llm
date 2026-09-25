@@ -229,9 +229,16 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
             elif "tool_calls" in d:
                 calls = d["tool_calls"]
             elif "usage" in d:
+                # Context size and cache reuse come from the first call of the turn; later
+                # calls (after a dice roll or lookup) resend the same prompt plus the tool
+                # result, so adding them up would double-count. Time and output do add up.
+                u = d["usage"]
+                if stats["rounds"] == 0:
+                    stats["prompt_tokens"] = u.get("prompt_tokens") or 0
+                    stats["cached_tokens"] = u.get("cached_tokens") or 0
                 stats["rounds"] += 1
-                for k in ("prompt_tokens", "cached_tokens", "prompt_ms", "completion_tokens"):
-                    stats[k] += d["usage"].get(k) or 0
+                stats["prompt_ms"] += u.get("prompt_ms") or 0
+                stats["completion_tokens"] += u.get("completion_tokens") or 0
         content += round_content
         if not calls:
             break

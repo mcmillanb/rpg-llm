@@ -585,3 +585,21 @@ async def test_arc_revision_keeps_history_and_refuses_truncated_answers(vault):
     assert "x" * 50 in c.read("arc-history/001.md")
     r = await arc.revise(c, FakeLLM([{"diverged": True, "reason": "?", "arc": "short"}]), filed)
     assert "skipped" in r["reason"] and "y" * 50 in c.read("arc.md")
+
+
+def test_turn_stats_count_context_once_across_tool_rounds(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    usage = lambda p, c: {"usage": {"prompt_tokens": p, "cached_tokens": c, "prompt_ms": 100,
+                                    "completion_tokens": 50}}
+    dm = FakeLLM(stream_rounds=[
+        [{"tool_calls": [{"id": "1", "name": "roll_dice", "arguments": '{"dice": "2D6", "reason": "x"}'}]},
+         usage(5000, 4000)],
+        [{"content": "Done."}, usage(5100, 5000)],
+    ])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "dice": "auto"}).json()["slug"]
+        client.post(f"/api/campaigns/{slug}/chat", json={"content": "go"})
+        st = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]["stats"]
+        assert (st["prompt_tokens"], st["cached_tokens"], st["rounds"]) == (5000, 4000, 2)
+        assert st["prompt_ms"] == 200 and st["completion_tokens"] == 100
