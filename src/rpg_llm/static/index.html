@@ -126,15 +126,44 @@ body[data-look="horror"] {
   --muted: #9a9387; --line: rgba(220,210,190,.15); --accent: #c0544a; --accent-ink: #fff;
   --player: rgba(36,32,30,.9); --gm: rgba(12,11,10,.89); --warn: #f07a7a;
   --display: "IM Fell English", Georgia, serif; }
+body[data-look][data-mode="light"] {
+  --bg: #f3f0ea; --panel: rgba(250,248,244,.94); --chrome: rgba(250,248,244,.9); --ink: #1d1b18;
+  --muted: #5d584f; --line: rgba(0,0,0,.13); --gm: rgba(252,251,248,.95);
+  --player: rgba(233,239,246,.96); --accent-ink: #fff; --warn: #a33; }
+body[data-look][data-mode="light"] .backdrop-shade { opacity: .55; }
+body[data-look] .divider { color: rgba(240,236,228,.72); text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+body[data-look] .divider::before, body[data-look] .divider::after { border-color: rgba(240,236,228,.22); }
+body[data-look] #more { background: var(--panel); }
+body[data-look="scifi"][data-mode="light"] { --accent: #1f6fa8; --player: rgba(228,238,250,.96); }
+body[data-look="fantasy"][data-mode="light"] { --accent: #8a5a12; --player: rgba(245,238,222,.96); }
+body[data-look="horror"][data-mode="light"] { --accent: #8e2a22; --player: rgba(240,234,228,.96); }
+body[data-look="cyberpunk"][data-mode="light"] { --accent: #b0127a; --player: rgba(244,232,246,.96); }
 body[data-look="cyberpunk"] {
   --bg: #05030a; --panel: rgba(14,8,24,.88); --chrome: rgba(8,4,16,.82); --ink: #e8e6f5;
   --muted: #a39ac0; --line: rgba(255,60,200,.22); --accent: #ff3cb4; --accent-ink: #12030c;
   --player: rgba(30,14,48,.9); --gm: rgba(10,6,18,.87); --warn: #ff8a8a;
   --display: "Share Tech Mono", ui-monospace, monospace; }
-.game { display: flex; align-items: center; gap: 12px; }
-.game .gameinfo { flex: 1; min-width: 0; }
-.game .del { border: 0; background: transparent; opacity: .45; font-size: 16px; }
-.game .del:hover { opacity: 1; }
+.games { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.gcard { position: relative; min-height: 170px; border-radius: 14px; overflow: hidden; cursor: pointer;
+  display: flex; align-items: flex-end; border: 1px solid var(--line); transition: transform .15s, box-shadow .15s; }
+.gcard:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(0,0,0,.25); }
+.gcard.art { background: linear-gradient(to top, rgba(0,0,0,.88) 10%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.1)),
+  var(--art) center / cover; color: #f2efe8; }
+.gcard.plainlook { background: var(--panel); }
+.gbody { display: flex; gap: 12px; align-items: flex-end; padding: 14px 16px; width: 100%; }
+.gport { width: 58px; height: 58px; border-radius: 50%; object-fit: cover; flex: none;
+  border: 2px solid rgba(255,255,255,.6); }
+.gtext { min-width: 0; }
+.gname { font-size: 19px; font-weight: 600; line-height: 1.25; }
+.gmeta { font: 13px/1.4 system-ui, sans-serif; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gcard .del { position: absolute; top: 8px; right: 8px; border: 0; background: rgba(0,0,0,.35);
+  color: #fff; opacity: 0; font-size: 14px; border-radius: 8px; transition: opacity .15s; }
+.gcard:hover .del, .gcard:focus-within .del { opacity: .85; }
+@media (pointer: coarse) { .gcard .del { opacity: .7; } }
+.welcome { text-align: center; max-width: 640px; margin: 5vh auto 0; }
+.welcome .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; border-radius: 14px; overflow: hidden; }
+.welcome .strip div { height: 110px; background: center / cover; }
+.welcome h2 { font-size: 22px; margin: 22px 0 6px; }
 #modal { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.45);
   display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 5vh 16px; }
 .sheet { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
@@ -209,13 +238,20 @@ let S = { slug: null, data: null, busy: false, shown: 150, poll: null };
   let t = null; try { t = localStorage.getItem("theme"); } catch {}
   if (t) document.documentElement.dataset.theme = t;
 })();
-$("themeBtn").onclick = () => {
+// Light/dark: the page tokens follow the choice (or the OS). Themed play pages keep their
+// painted backdrop either way; body[data-mode] switches their bubbles and bars.
+function applyMode() {
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
-  const next = cur === "dark" ? "light" : "dark";
+  document.body.dataset.mode = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+}
+$("themeBtn").onclick = () => {
+  const next = document.body.dataset.mode === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("theme", next); } catch {}
+  applyMode();
 };
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyMode);
+applyMode();
 
 // ---- tiny markdown -------------------------------------------------------
 function md(src) {
@@ -281,12 +317,30 @@ async function showList() {
   setLook(null);
   $("newBtn").classList.remove("hidden");
   const list = await api("/api/campaigns");
-  $("view").innerHTML = list.map(c => `<div class="card link game" data-slug="${esc(c.slug)}">
-      <div class="gameinfo"><strong>${esc(c.name)}</strong>
-        <div class="ui muted">${esc(c.system || "")}${c.last_activity ? " · last played " + new Date(c.last_activity * 1000).toLocaleString() : " · not started"}</div></div>
+  const when = (t) => {
+    if (!t) return "not started";
+    const d = (Date.now() / 1000 - t) / 86400;
+    return d < 1 ? "played today" : d < 2 ? "played yesterday" : d < 14 ? `played ${Math.floor(d)} days ago` : "last played " + new Date(t * 1000).toLocaleDateString();
+  };
+  $("view").innerHTML = list.length ? `<div class="games">${list.map(c => `
+    <div class="gcard link ${c.backdrop ? "art" : "plainlook"}" data-slug="${esc(c.slug)}" ${c.backdrop ? `style="--art:url('${c.backdrop}')"` : ""}>
       <button class="del" data-del="${esc(c.slug)}" title="Delete this game">🗑</button>
-    </div>`).join("") || `<div class="card ui muted">No campaigns yet. Start one with <strong>+ New campaign</strong> above.</div>`;
-  document.querySelectorAll(".card.link").forEach(el => el.onclick = () => openCampaign(el.dataset.slug));
+      <div class="gbody">
+        ${c.portrait ? `<img class="gport" src="${c.portrait}" alt="">` : ""}
+        <div class="gtext">
+          <div class="gname">${esc(c.name)}</div>
+          <div class="gmeta">${esc(c.system || "")}</div>
+          <div class="gmeta">${c.location ? esc(c.location) + " · " : ""}${c.scenes > 1 ? `scene ${c.scenes} · ` : ""}${when(c.last_activity)}</div>
+        </div>
+      </div>
+    </div>`).join("")}</div>` : `
+    <div class="welcome ui">
+      <div class="strip">${["scifi/orbit", "fantasy/town", "horror/village", "cyberpunk/street"].map(b => `<div style="background-image:url('/static/backdrops/${b}.webp')"></div>`).join("")}</div>
+      <h2>Start your first adventure</h2>
+      <p class="muted">Pick a game system, describe (or have the GM suggest) where your story begins, and play. The archivist keeps the story straight as it grows.</p>
+      <p><button class="primary" onclick="openNewCampaign()">+ New campaign</button></p>
+    </div>`;
+  document.querySelectorAll(".gcard").forEach(el => el.onclick = () => openCampaign(el.dataset.slug));
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = async (e) => {
     e.stopPropagation();
     const name = list.find(c => c.slug === b.dataset.del)?.name;

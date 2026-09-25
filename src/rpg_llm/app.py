@@ -419,8 +419,22 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
 
     @app.get("/api/campaigns")
     async def list_campaigns():
-        return [{"slug": c.slug, "name": c.meta.get("name"), "system": c.meta.get("system"),
-                 "last_activity": c.last_activity()} for c in R().vault.campaigns()]
+        out = []
+        for c in R().vault.campaigns():
+            theme = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
+            scene = c.load_state().current
+            kinds = themes.settings(theme)
+            out.append({
+                "slug": c.slug, "name": c.meta.get("name"), "system": c.meta.get("system"),
+                "last_activity": c.last_activity(), "theme": theme,
+                "backdrop": (f"/static/backdrops/{theme}/"
+                             f"{scene.setting if scene.setting in kinds else kinds[0]}.webp")
+                if kinds else None,
+                "portrait": (f"/api/campaigns/{c.slug}/portraits/{p}"
+                             if (p := portrait.current(c)) else None),
+                "location": scene.location, "scenes": scene.id,
+            })
+        return out
 
     @app.post("/api/campaigns")
     async def create_campaign(body: NewCampaign):
