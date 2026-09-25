@@ -119,7 +119,7 @@ async def test_audit_keeps_real_moves_and_undoes_announced_or_reversed_ones(vaul
                                Scene(4, 9, location="market")]))
     ev = lambda move, before, after, back="none": {
         "place_before": before, "movement_quote": move, "place_after": after,
-        "same_site": False, "return_quote": back, "reason": "r"}
+        "same_site": False, "time_skip_quote": "none", "return_quote": back, "reason": "r"}
     llm = FakeLLM([ev("none", "bar", "bar"),                              # not a move
                    ev("board the Sparrow", "bar", "Sparrow"),              # keep
                    ev("take the lift down to the market", "Sparrow", "market",
@@ -661,3 +661,12 @@ async def test_tracker_tags_the_setting_for_themed_campaigns(vault):
     assert c.load_state().current.setting == "orbit"
     enum = llm.calls[0][1][1]["content"]
     assert "space, orbit, planet, settlement, interior" in enum
+
+
+def test_audit_keeps_a_time_skip_in_the_same_place():
+    after = [{"id": 5, "role": "user", "content": "I sleep"},
+             {"id": 6, "role": "assistant", "content": "You sleep badly. The next morning, the market is loud."}]
+    v = {"place_before": "startown", "movement_quote": "none", "place_after": "startown",
+         "same_site": True, "time_skip_quote": "The next morning", "return_quote": "none", "reason": "r"}
+    assert router.judge_boundary(v, after) == (True, "time skip narrated")
+    assert router.judge_boundary({**v, "time_skip_quote": "none"}, after)[0] is False

@@ -49,11 +49,12 @@ AUDIT_SCHEMA = {  # evidence first; the code decides from it (a bare keep/undo f
         "movement_quote": {"type": "string"},
         "place_after": {"type": "string"},
         "same_site": {"type": "boolean"},
+        "time_skip_quote": {"type": "string"},
         "return_quote": {"type": "string"},
         "reason": {"type": "string"},
     },
-    "required": ["place_before", "movement_quote", "place_after", "same_site", "return_quote",
-                 "reason"],
+    "required": ["place_before", "movement_quote", "place_after", "same_site", "time_skip_quote",
+                 "return_quote", "reason"],
     "additionalProperties": False,
 }
 
@@ -327,10 +328,13 @@ async def gatekeep(campaign: Campaign, router: LLMClient | None, message: str,
 # ---- audit ------------------------------------------------------------------
 
 def judge_boundary(verdict: dict, after: list[dict]) -> tuple[bool, str]:
-    """Keep a scene boundary only if the GM's reply at it narrates a real move (quoted, outside
-    dialogue, to a different place) and the characters didn't go straight back afterwards."""
+    """Keep a scene boundary if the GM's reply at it narrates a significant time skip, or a real
+    move (quoted, outside dialogue, to a different site) that the characters didn't go straight
+    back from."""
     at = after[1]["content"] if len(after) > 1 and after[1]["role"] == "assistant" else ""
     later = "\n".join(m["content"] for m in after[2:] if m["role"] == "assistant")
+    if in_narration(verdict.get("time_skip_quote", ""), at):
+        return True, "time skip narrated"  # a new scene even without changing place
     move = verdict.get("movement_quote", "")
     if quote_is_dialogue(move, at) or not in_narration(move, at):
         return False, "no move narrated at the boundary"

@@ -167,6 +167,9 @@ Return JSON:
 - same_site: true if place_before and place_after are parts of the same building, ship,
   station, settlement or site (a shop and the room behind its curtain; a highport concourse and
   its docking bays)
+- time_skip_quote: the exact words from the GM's NARRATION in the >>> exchange that show a
+  significant amount of time passing (overnight, days, a journey): "The next morning...",
+  "Three days later...". "none" if no real time passes (minutes don't count)
 - return_quote: the exact words from a LATER GM narration showing the characters going back to
   place_before. "none" if they didn't go back
 - reason: one sentence"""
