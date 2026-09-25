@@ -28,6 +28,14 @@ PREMISE = ("Tomas Reyes is a former Scout Service courier, now a freelance trade
            "but the noble's household swears it was never sent. The story opens at the downport "
            "of Mora, where customs has just flagged the Lantern for inspection.")
 
+TRAVEL = [
+    "I head back to the Lantern and tell Ilse to prep for lift-off.",
+    "I take the tram up to the orbital highport to look for cargo.",
+    "We lift off and jump for the next system on our route.",
+    "I go down into the startown market to find a buyer and a drink.",
+    "I find a cheap room in the startown and get some sleep; next morning I get moving.",
+]
+
 PLAYER = """You are playing the player character in a solo tabletop RPG run by a game master.
 Character: {premise}
 Reply with ONLY your character's next action or words: 1-3 sentences, first person, decisive.
@@ -145,9 +153,9 @@ async def main():
         if n % 25 == 0 and places:
             name = places[random.randrange(len(places))].split("\n")[0].replace("- name: ", "").strip()
             move = f"I decide to head back to {name}; there's something there I need to deal with."
+        elif n % 6 == 0:  # a concrete move: nudges alone let the simulated player stay put
+            move = f"That's enough here. {TRAVEL[(n // 6) % len(TRAVEL)]}"
         else:
-            if n % 6 == 0:
-                nudge = "Now move the story on: travel somewhere new, or let time pass."
             move = await player_move(llm, history, nudge)
         if n in unsend_at:
             r = turn(base, slug, move, abort_after=4)
