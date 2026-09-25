@@ -1,0 +1,26 @@
+[
+ {
+  "user_id": 5,
+  "before": "Reginald Station bar",
+  "location": "the Kestrel",
+  "expect": "keep"
+ },
+ {
+  "user_id": 9,
+  "before": "the Kestrel",
+  "location": "orbit around Efate Prime",
+  "expect": "keep"
+ },
+ {
+  "user_id": 11,
+  "before": "orbit around Efate Prime",
+  "location": "Efate startown",
+  "expect": "keep"
+ },
+ {
+  "user_id": 19,
+  "before": "Efate startown",
+  "location": "the Kestrel",
+  "expect": "keep"
+ }
+]

@@ -107,6 +107,10 @@ Recent exchanges (oldest first):
 {recent}
 
 Return JSON:
+- time_skip_quote: the exact words from the LATEST GM reply's NARRATION (quote the GM, never
+  the player) that show significant time passing (sleeping, overnight, days, a long journey),
+  e.g. "You sleep nine hours", "By morning", "A week in jump space passes". "none" if no real
+  time passes in the GM's reply (minutes don't count)
 - movement_quote: the exact words from the LATEST GM reply's NARRATION that describe the player
   character travelling to or arriving at a different place, or a time skip. "none" if there are
   no such words. Dialogue never counts: anything a character says inside quotation marks
@@ -118,8 +122,8 @@ Return JSON:
   its own site, separate from the port, station or planet where it is docked or landed.
 - reason: one sentence comparing location_now with the current scene location (and noting any
   time skip)
-- transition: true only if movement_quote is not "none" AND (location_now is a different place
-  from the current scene location, or there was a significant time skip)
+- transition: true if time_skip_quote is not "none", or if movement_quote is not "none" AND
+  location_now is a different site from the current scene location
 - confidence: 0-1, how sure you are of your answer
 - new_location: location_now if transition, else null
 - scene_title: 3-6 word title describing what happened in the scene that is ENDING, or null if

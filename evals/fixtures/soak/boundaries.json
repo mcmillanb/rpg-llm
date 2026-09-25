@@ -2,21 +2,25 @@
  {
   "location": "the room behind the wall",
   "user_id": 64,
-  "expect": "undo"
+  "expect": "undo",
+  "before": "Mora downport"
  },
  {
   "location": "the orbital highport",
   "user_id": 74,
-  "expect": "undo"
+  "expect": "undo",
+  "before": "Mora downport"
  },
  {
   "location": "the Lantern",
   "user_id": 90,
-  "expect": "undo"
+  "expect": "undo",
+  "before": "Mora downport"
  },
  {
   "location": "the startown market",
   "user_id": 98,
-  "expect": "keep"
+  "expect": "keep",
+  "before": "Mora downport"
  }
 ]

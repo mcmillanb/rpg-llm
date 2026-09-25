@@ -1,0 +1,11 @@
+name: Targeted Test
+system: Traveller (Third Imperium)
+premise: Captain Lena Sorel runs the free trader Kestrel with her engineer Oskar.
+  She carries sealed crates for a broker named Ines Varga and needs paying work to
+  cover the ship's mortgage.
+dm_instructions: ''
+created: 1790326147.850431
+allow_rewind: false
+consequences: normal
+dice: auto
+theme: scifi

@@ -19,6 +19,7 @@ TRACK_SCHEMA = {  # location first: naming where they are before judging makes i
     "type": "object",
     "properties": {
         "movement_quote": {"type": "string"},
+        "time_skip_quote": {"type": "string"},
         "location_now": {"type": ["string", "null"]},
         "reason": {"type": "string"},
         "transition": {"type": "boolean"},
@@ -26,7 +27,8 @@ TRACK_SCHEMA = {  # location first: naming where they are before judging makes i
         "new_location": {"type": ["string", "null"]},
         "scene_title": {"type": ["string", "null"]},
     },
-    "required": ["movement_quote", "location_now", "reason", "transition", "confidence", "new_location",
+    "required": ["movement_quote", "time_skip_quote", "location_now", "reason", "transition",
+                 "confidence", "new_location",
                  "scene_title"],
     "additionalProperties": False,
 }
@@ -105,7 +107,9 @@ async def _verdict(campaign: Campaign, router: LLMClient, state: State, messages
         schema, max_tokens=400)
     reply = upto[-1]["content"] if upto and upto[-1]["role"] == "assistant" else ""
     overrule = None
-    if verdict.get("transition"):
+    skipped = in_narration(verdict.get("time_skip_quote", ""), reply) and \
+        not quote_is_dialogue(verdict.get("time_skip_quote", ""), reply)
+    if verdict.get("transition") and not skipped:
         quote = verdict.get("movement_quote", "")
         if quote_is_dialogue(quote, reply):
             overrule = "evidence was dialogue"
@@ -338,7 +342,10 @@ def judge_boundary(verdict: dict, after: list[dict]) -> tuple[bool, str]:
     move = verdict.get("movement_quote", "")
     if quote_is_dialogue(move, at) or not in_narration(move, at):
         return False, "no move narrated at the boundary"
-    if verdict.get("same_site") or same_place(verdict.get("place_before"), verdict.get("place_after")):
+    # The model's same_site answer proved unreliable (it merged a ship with the station it was
+    # docked at, and orbit with the planet's surface), and merging a real boundary costs more
+    # than keeping a doubtful one; so only the name check decides.
+    if same_place(verdict.get("place_before"), verdict.get("place_after")):
         return False, "same place"
     back = verdict.get("return_quote", "")
     if in_narration(back, later):

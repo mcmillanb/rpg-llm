@@ -21,6 +21,9 @@ FIXTURES = {
     # One long stand-off in a bar and its back room (autoplayed). 12 has an NPC naming a
     # meeting place in dialogue.
     "autoplay": "nnnnnnnnnnnn",
+    # Scripted: bar -> ship (3), jump (5), down to the startown (6), an overnight rest in the same
+    # startown (8: a time skip), the Scout office in the same startown (9: no), back to the ship (10)
+    "targeted": "nnynyynyny",
 }
 
 

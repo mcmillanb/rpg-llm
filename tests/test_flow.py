@@ -714,3 +714,13 @@ def test_portrait_needs_an_image_generator(tmp_path):
                  archiver=FakeLLM())
     with TestClient(create_app(rt)) as client:
         assert client.post("/api/suggest/portrait", json={}).status_code == 409
+
+
+async def test_narrated_time_skip_lets_a_scene_change_in_the_same_place(vault):
+    c = vault.create("T")
+    c.save_state(State(scenes=[Scene(1, 1, location="the inn")]))
+    play(c, ("a", "At the inn."), ("I sleep", "You sleep nine hours. You wake to rain on the shutters."))
+    v = {**verdict(True, 0.9, "the inn"), "time_skip_quote": "You sleep nine hours",
+         "movement_quote": "none", "location_now": "the inn"}
+    await router.track(c, FakeLLM([v]), threshold=0.7)
+    assert len(c.load_state().scenes) == 2  # not overruled as "same place"
