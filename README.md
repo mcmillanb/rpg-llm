@@ -15,6 +15,25 @@ campaign wiki (an Obsidian-style markdown vault) and gives the GM only what it n
   scene notes, location and NPC notes, a timeline and an updated brief. The current scene is
   never touched. The raw transcript is never edited, so the wiki can always be rebuilt.
 
+Each campaign also has:
+
+- **Table settings,** chosen when you create it: consequences (low-stakes / normal / brutal)
+  and dice (rolled by the app and shown in the story / you roll your own / no dice). Auto dice
+  are real random rolls the GM asks for through a tool; it narrates from the result and can't
+  invent one. **Rewinds** (editing your last move or re-rolling the GM's reply after seeing it)
+  are off by default; you can always take a message back while the GM is still replying (Esc).
+- **A character sheet** (money, gear, injuries, skills, assets, companions, debts). New
+  campaigns start with one written from the premise; the router updates it after every reply;
+  you can edit it (the Sheet button). The GM sees it every turn and keeps to it. Taking a turn
+  back also undoes what that turn did to the sheet.
+- **A hidden story arc:** GM-only notes (the real conflict, factions, possible beats and
+  climaxes, secrets) written at setup and revised between sessions when play goes somewhere
+  else. It's guidance, not rails. The play page can't show it; admin can, behind a spoiler
+  warning.
+- **Suggestions when you create it:** the game-system picker lists what the GM model says it
+  can run, and a premise suggester writes openings (or builds on your idea) that you can flip
+  back and forth between.
+
 The prompt is ordered so the model server can reuse its prompt cache: typically 70–95% of each
 turn's prompt comes from cache, so replies don't slow down as the campaign grows. Each GM reply
 shows a ⚡ chip with the context size and cache hit rate.
@@ -81,8 +100,10 @@ resume an interrupted import.
 
 ```
 vault/campaigns/<campaign>/
-  campaign.yaml      name, system, premise, extra GM instructions
+  campaign.yaml      name, system, premise, GM instructions, consequences, dice, rewinds
   brief.md           always in the GM's context
+  arc.md             hidden story arc (GM only); earlier versions in arc-history/
+  character.yaml     character sheet; every version in character.history.jsonl
   transcript.jsonl   everything ever said (append-only; regenerate/edit supersede, never delete)
   state.yaml         scene boundaries and status
   gazetteer.yaml     wiki index: name, aliases, type, path, one-line summary
@@ -100,4 +121,5 @@ uv run pytest               # unit tests, fake models, no GPU needed
 uv run python scripts/smoke.py    # checks the configured models from the command line
 uv run python evals/track.py      # router prompt evals against the real models
 uv run python evals/gatekeep.py
+uv run python evals/soak.py --base http://localhost:8702   # long automated playtest (test vault!)
 ```
