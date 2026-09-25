@@ -8,11 +8,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import admin, arc, compactor, context, dice, router, sheet, suggest, themes, wiki
+from rpg_llm import (admin, arc, compactor, context, dice, images, portrait, router, sheet,
+                     suggest, themes, wiki)
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -342,6 +343,25 @@ class NewCampaign(BaseModel):
     dice: str = "auto"
     theme: str = "auto"  # "auto" picks from the system and genre
     genre: str = ""
+    portrait: str = ""  # token of a portrait made during setup
+    appearance: str = ""
+
+
+class PortraitAsk(BaseModel):
+    system: str = ""
+    premise: str = ""
+    look: str = "auto"
+    genre: str = ""
+    appearance: str = ""
+    avoid: list[str] = []
+
+
+class NewPortrait(BaseModel):
+    appearance: str = ""
+
+
+class ChoosePortrait(BaseModel):
+    name: str
 
 
 class PremiseAsk(BaseModel):
@@ -395,7 +415,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def status():
         rt = R()
         return {"configured": rt.configured, "missing": rt.settings.app.missing(),
-                "warnings": rt.settings.app.warnings()}
+                "warnings": rt.settings.app.warnings(), "images": rt.settings.app.images.enabled}
 
     @app.get("/api/campaigns")
     async def list_campaigns():
@@ -408,7 +428,11 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         t = context.table({"consequences": body.consequences, "dice": body.dice})
         theme = body.theme if body.theme in themes.THEMES or body.theme == themes.PLAIN \
             else themes.default_for(body.system, body.genre)
-        c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t, "theme": theme})
+        c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t, "theme": theme,
+                     **({"appearance": body.appearance.strip()} if body.appearance.strip() else {})})
+        cand = portrait.candidate_path(R().vault.root, body.portrait)
+        if cand:
+            portrait.add(c, cand.read_bytes())
         rt = R()
         if rt.configured:
             async def setup():
@@ -430,6 +454,81 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def list_themes():
         return {**{k: v["label"] for k, v in themes.public().items()}, "plain": "Plain"}
 
+    def resolve_look(look: str, system: str, genre: str) -> str:
+        return look if look in themes.THEMES or look == themes.PLAIN else themes.default_for(system, genre)
+
+    @app.post("/api/suggest/portrait")
+    async def suggest_portrait(body: PortraitAsk):
+        rt = R()
+        rt.require_configured()
+        cfg = rt.settings.app.images
+        if not cfg.enabled:
+            raise HTTPException(409, "No image generator is set up (admin → Image generation).")
+        d = await portrait.describe(rt.dm, body.system, body.premise, body.appearance, body.avoid)
+        try:
+            webp = await portrait.paint(cfg, resolve_look(body.look, body.system, body.genre), d["prompt"])
+        except images.ImageError as e:
+            raise HTTPException(502, str(e))
+        token = portrait.save_candidate(rt.vault.root, webp, d)
+        return {"token": token, "url": f"/api/portraits/tmp/{token}", **d}
+
+    @app.get("/api/portraits/tmp/{token}")
+    async def portrait_candidate(token: str):
+        p = portrait.candidate_path(R().vault.root, token)
+        if not p:
+            raise HTTPException(404, "no such portrait")
+        return FileResponse(p, media_type="image/webp")
+
+    @app.get("/api/campaigns/{slug}/portraits")
+    async def list_portraits(slug: str):
+        c = R().campaign(slug)
+        return {"current": portrait.current(c), "all": portrait.history(c),
+                "appearance": (sheet.load(c) or {}).get("appearance") or c.meta.get("appearance", ""),
+                "enabled": R().settings.app.images.enabled}
+
+    @app.get("/api/campaigns/{slug}/portraits/{name}")
+    async def portrait_file(slug: str, name: str):
+        c = R().campaign(slug)
+        if name not in portrait.history(c):
+            raise HTTPException(404, "no such portrait")
+        return FileResponse(c.path(f"art/portraits/{name}"), media_type="image/webp",
+                            headers={"Cache-Control": "max-age=31536000, immutable"})
+
+    @app.post("/api/campaigns/{slug}/portraits")
+    async def new_portrait(slug: str, body: NewPortrait):
+        rt = R()
+        rt.require_configured()
+        c = rt.campaign(slug)
+        cfg = rt.settings.app.images
+        if not cfg.enabled:
+            raise HTTPException(409, "No image generator is set up (admin → Image generation).")
+        sh = sheet.load(c) or {}
+        appearance = body.appearance.strip() or sh.get("appearance") or c.meta.get("appearance", "")
+        premise = (f"{sh.get('name', '')}: {sh.get('concept', '')}\n" if sh else "") + \
+            (c.meta.get("premise") or c.brief)
+        avoid = [c.meta["portrait_prompt"]] if c.meta.get("portrait_prompt") else []
+        d = await portrait.describe(rt.dm, c.meta.get("system") or "", premise, appearance, avoid)
+        try:
+            webp = await portrait.paint(cfg, c.meta.get("theme") or "plain", d["prompt"])
+        except images.ImageError as e:
+            raise HTTPException(502, str(e))
+        name = portrait.add(c, webp, d["prompt"])
+        if body.appearance.strip() and sh:  # the player's new description goes on the sheet
+            async with rt.lock(slug):
+                msgs = c.messages()
+                sheet.save(c, {**sh, "appearance": body.appearance.strip()},
+                           msgs[-1]["id"] if msgs else 0, "appearance edited")
+        return {"current": name, "appearance": d["appearance"]}
+
+    @app.put("/api/campaigns/{slug}/portrait")
+    async def choose_portrait(slug: str, body: ChoosePortrait):
+        c = R().campaign(slug)
+        try:
+            portrait.choose(c, body.name)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+        return {"current": body.name}
+
     @app.get("/api/suggest/systems")
     async def suggest_systems(refresh: bool = False):
         rt = R()
@@ -450,6 +549,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         state = c.load_state()
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
                 "table": context.table(c.meta),
+                "portrait": portrait.current(c),
+                "images": rt.settings.app.images.enabled,
                 "theme": c.meta.get("theme") or themes.default_for(c.meta.get("system") or ""),
                 "themes": themes.public(),
                 "messages": c.messages(),

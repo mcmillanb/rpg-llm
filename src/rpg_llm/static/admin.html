@@ -115,6 +115,32 @@ pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; 
     </details>
     <div id="roles"></div>
 
+    <h2>Image generation <span class="muted" style="text-transform:none;letter-spacing:0">(optional)</span></h2>
+    <div class="card" id="imagesCard">
+      <p class="muted" style="margin-top:0">Paints character portraits (and later NPCs and scenes). Small images (512×512) take ~8 s on a local
+        Qwen-Image; hosted services work too. Leave it off and everything else still works.</p>
+      <div class="row">
+        <div><label>Generator</label><select id="i_kind">
+          <option value="none">None</option>
+          <option value="comfyui">ComfyUI (local, Qwen-Image 2.1 workflow built in)</option>
+          <option value="openai">OpenAI-compatible images API (OpenAI, hosted or local servers)</option></select></div>
+        <div class="img-on"><label>URL</label><input id="i_base_url" placeholder="http://192.168.1.10:8188  or  https://api.openai.com/v1"></div>
+      </div>
+      <div class="row img-on">
+        <div class="img-openai"><label>Model</label><input id="i_model" placeholder="gpt-image-1"></div>
+        <div class="img-openai"><label>API key</label><input id="i_api_key" type="password" autocomplete="off"></div>
+      </div>
+      <details class="img-comfy"><summary class="muted" style="cursor:pointer;margin-top:10px">ComfyUI model files</summary>
+        <div class="row">
+          <div><label>Diffusion model</label><input id="i_unet"></div>
+          <div><label>Text encoder</label><input id="i_clip"></div>
+          <div><label>VAE</label><input id="i_vae"></div>
+          <div><label>Steps</label><input id="i_steps" type="number" min="1" max="100"></div>
+        </div></details>
+      <div class="actions img-on"><button id="i_test">Test: paint a sample portrait</button><span id="i_msg" class="muted"></span></div>
+      <div id="i_result"></div>
+    </div>
+
     <h2>Tuning</h2>
     <div class="card">
       <div class="row">
@@ -206,7 +232,7 @@ async function load() {
   CFG = await api("/api/admin/config");
   $("main").classList.remove("hidden"); $("savebar").classList.remove("hidden");
   $("logout").classList.toggle("hidden", !CFG.has_password);
-  renderBanners(); renderServers(); renderRoles(); renderTuning(); renderPassword();
+  renderBanners(); renderServers(); renderRoles(); renderTuning(); renderImages(); renderPassword();
   await Promise.all(CFG.servers.map(s => probe(s)));
   loadCampaigns(); loadJobs();
   dirty = false; $("saveMsg").textContent = "";
@@ -365,8 +391,32 @@ function renderPassword() {
   $("clearPw").parentElement.classList.toggle("hidden", !CFG.has_password);
 }
 
+const IMG_FIELDS = ["kind", "base_url", "api_key", "model", "unet", "clip", "vae", "steps"];
+function renderImages() {
+  for (const k of IMG_FIELDS) {
+    const el = $("i_" + k); el.value = CFG.images[k] ?? "";
+    el.oninput = el.onchange = () => { CFG.images[k] = el.type === "number" ? +el.value : el.value; markDirty(); showImageFields(); };
+  }
+  showImageFields();
+  $("i_test").onclick = async () => {
+    $("i_test").disabled = true; $("i_msg").textContent = "Painting… (the first image after a start can take a minute)"; $("i_result").innerHTML = "";
+    try {
+      const r = await api("/api/admin/test-images", { method: "POST", body: JSON.stringify(formBody()) });
+      $("i_msg").innerHTML = r.ok ? `<span class="ok">✓ ${r.seconds}s</span>` : `<span class="bad">✗ ${esc(r.error)}</span>`;
+      if (r.ok) $("i_result").innerHTML = `<img src="${r.image}" style="width:192px;border-radius:10px;margin-top:10px">`;
+    } catch (e) { $("i_msg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+    $("i_test").disabled = false;
+  };
+}
+function showImageFields() {
+  const k = CFG.images.kind;
+  document.querySelectorAll(".img-on").forEach(el => el.classList.toggle("hidden", k === "none"));
+  document.querySelectorAll(".img-openai").forEach(el => el.classList.toggle("hidden", k !== "openai"));
+  document.querySelectorAll(".img-comfy").forEach(el => el.classList.toggle("hidden", k !== "comfyui"));
+}
+
 function formBody() {
-  return { servers: CFG.servers, dm: CFG.dm, router: CFG.router, archiver: CFG.archiver, tuning: CFG.tuning,
+  return { servers: CFG.servers, dm: CFG.dm, router: CFG.router, archiver: CFG.archiver, tuning: CFG.tuning, images: CFG.images,
            new_password: $("newPw").value || null, clear_password: $("clearPw").checked };
 }
 

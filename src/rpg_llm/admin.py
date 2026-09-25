@@ -12,8 +12,8 @@ import httpx2
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from rpg_llm import arc, compactor, context, router, themes
-from rpg_llm.config import ROLES, AppConfig, NotConfigured, Role, Server, Tuning
+from rpg_llm import arc, compactor, context, images, router, themes
+from rpg_llm.config import ROLES, AppConfig, ImageGen, NotConfigured, Role, Server, Tuning
 from rpg_llm.importers import openwebui
 from rpg_llm.llm import LLMClient
 
@@ -31,6 +31,7 @@ class ConfigIn(BaseModel):
     router: Role
     archiver: Role
     tuning: Tuning
+    images: ImageGen = ImageGen()
     new_password: str | None = None
     clear_password: bool = False
 
@@ -76,8 +77,11 @@ def _merge(body: ConfigIn, old: AppConfig) -> AppConfig:
             prev = old.server(s.id)
             s = s.model_copy(update={"api_key": prev.api_key if prev else ""})
         servers.append(s.model_copy(update={"base_url": s.base_url.strip().rstrip("/")}))
+    img = body.images
+    if img.api_key.startswith(MASK):
+        img = img.model_copy(update={"api_key": old.images.api_key})
     new = old.model_copy(update={"servers": servers, "dm": body.dm, "router": body.router,
-                                 "archiver": body.archiver, "tuning": body.tuning})
+                                 "archiver": body.archiver, "tuning": body.tuning, "images": img})
     if body.clear_password:
         new.set_password(None)
     elif body.new_password:
@@ -89,6 +93,7 @@ def _public(cfg: AppConfig) -> dict:
     d = cfg.model_dump(exclude={"admin_password_hash", "secret"})
     for s in d["servers"]:
         s["api_key"] = _mask(s["api_key"])
+    d["images"]["api_key"] = _mask(d["images"]["api_key"])
     d["has_password"] = bool(cfg.admin_password_hash)
     d["missing"] = cfg.missing()
     d["warnings"] = cfg.warnings()
@@ -244,6 +249,20 @@ def register(app: FastAPI, R) -> None:
         if role not in ROLES:
             raise HTTPException(404, "unknown role")
         return await _test_role(_merge(body, R().settings.app), role)
+
+    @app.post("/api/admin/test-images", dependencies=auth)
+    async def test_images(body: ConfigIn):
+        """Paint one small test portrait with the (possibly unsaved) image settings."""
+        cfg = _merge(body, R().settings.app).images
+        t = time.time()
+        try:
+            webp = await images.generate(cfg, images.portrait_prompt(
+                "plain", "a friendly innkeeper with a grey beard and a leather apron"), 512, 512)
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        import base64
+        return {"ok": True, "seconds": round(time.time() - t, 1),
+                "image": "data:image/webp;base64," + base64.b64encode(webp).decode()}
 
     # ---- campaigns ------------------------------------------------------------
 

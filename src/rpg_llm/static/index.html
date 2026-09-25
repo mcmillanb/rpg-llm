@@ -152,6 +152,20 @@ label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
   background: var(--bg); border: 1px solid var(--line); }
 .roll.ok { border-left: 3px solid #3c8d4a; } .roll.fail { border-left: 3px solid var(--warn); }
 .histnav { display: inline-flex; gap: 6px; align-items: center; }
+.portraitbox { display: flex; gap: 14px; align-items: flex-start; }
+.portraitbox > div:last-child { flex: 1; min-width: 0; }
+.pimg { width: 144px; height: 144px; border-radius: 12px; flex: none; background: var(--bg) center / cover;
+  border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font: 12px system-ui, sans-serif; text-align: center; }
+@media (max-width: 620px) { .portraitbox { flex-direction: column; } }
+.urow { display: flex; gap: 10px; align-items: flex-start; margin-left: 12%; }
+.urow .msg.user { margin-left: 0; flex: 1; min-width: 0; }
+.avatar { width: 44px; height: 44px; border-radius: 50%; margin-top: 14px; flex: none;
+  object-fit: cover; border: 1px solid var(--line); cursor: pointer; }
+@media (max-width: 620px) { .urow { margin-left: 4%; } .avatar { width: 32px; height: 32px; } }
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.thumbs img { width: 52px; height: 52px; border-radius: 8px; cursor: pointer; opacity: .7; border: 2px solid transparent; }
+.thumbs img.cur { opacity: 1; border-color: var(--accent); }
 .histnav button { padding: 4px 9px; }
 label.check input { width: auto; }
 </style>
@@ -305,6 +319,22 @@ function openNewCampaign() {
       <span class="histnav"><button id="nPrev" title="Previous suggestion">◀</button><span id="nPos" class="muted small"></span><button id="nNext" title="Next suggestion">▶</button></span>
       <span id="nPremiseMsg" class="muted small"></span>
     </div>
+    <div id="nPortraitWrap" class="hidden">
+      <label>Portrait <span class="muted">(optional): your character's avatar in the chat</span></label>
+      <div class="portraitbox">
+        <div id="nPortrait" class="pimg">no portrait yet</div>
+        <div>
+          <div class="row-actions" style="margin-top:0">
+            <button id="nPaint">🎨 Make a portrait</button>
+            <button id="nRepaint" disabled>↻ Try another</button>
+            <span class="histnav hidden" id="pNav"><button id="pPrev">◀</button><span id="pPos" class="muted small"></span><button id="pNext">▶</button></span>
+          </div>
+          <label>Appearance <span class="muted">(the GM fills this in; edit it and Try another to change the look, or clear it for someone new)</span></label>
+          <textarea id="nAppearance" rows="2"></textarea>
+          <div id="nPortraitMsg" class="muted small"></div>
+        </div>
+      </div>
+    </div>
     <label>Extra GM instructions <span class="muted">(optional)</span></label>
     <textarea id="nExtra" rows="2" placeholder="Gritty and grounded. Keep replies under 250 words."></textarea>
     <div class="two">
@@ -332,6 +362,14 @@ function openNewCampaign() {
   $("nRefresh").onclick = () => loadSystems(true);
   $("nSystemPick").onchange = systemChanged;
   $("nSuggest").onclick = () => suggestPremise(true);
+  if (S.imagesEnabled) {
+    $("nPortraitWrap").classList.remove("hidden");
+    $("nPaint").onclick = () => paintPortrait();
+    $("nRepaint").onclick = () => paintPortrait();
+    $("pPrev").onclick = () => showPortrait(PORT.at - 1);
+    $("pNext").onclick = () => showPortrait(PORT.at + 1);
+    if (PORT.at >= 0) showPortrait(PORT.at);
+  }
   $("nAnother").onclick = () => suggestPremise(false);
   $("nPrev").onclick = () => showSuggestion(NEW.at - 1);
   $("nNext").onclick = () => showSuggestion(NEW.at + 1);
@@ -342,8 +380,11 @@ function openNewCampaign() {
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
       name, system: chosenSystem(), premise: $("nPremise").value, dm_instructions: $("nExtra").value,
       allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value,
-      theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "" }) });
+      theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
+      portrait: PORT.at >= 0 ? PORT.history[PORT.at].token : "",
+      appearance: S.imagesEnabled ? $("nAppearance").value : "" }) });
     NEW = { seed: "", history: [], at: -1 };
+    PORT = { history: [], at: -1 };
     close(); openCampaign(slug);
   };
 }
@@ -396,6 +437,41 @@ async function suggestPremise(fresh) {
   } catch (e) { $("nPremiseMsg").textContent = "Couldn't get a suggestion: " + e.message; }
   $("nSuggest").disabled = false;
   updateHistNav();
+}
+
+// Portraits during setup: every attempt is kept (◀ ▶); Try another reuses the appearance text,
+// so edit it to steer the look or clear it for a different character.
+let PORT = { history: [], at: -1 };
+async function paintPortrait() {
+  const btns = [$("nPaint"), $("nRepaint")];
+  btns.forEach(b => b.disabled = true);
+  $("nPortraitMsg").textContent = "The GM describes your character, then it's painted (~10–30 s)…";
+  $("nPortrait").textContent = "painting…";
+  try {
+    const r = await api("/api/suggest/portrait", { method: "POST", body: JSON.stringify({
+      system: chosenSystem(), premise: $("nPremise").value, look: $("nLook").value,
+      genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
+      appearance: $("nAppearance").value, avoid: PORT.history.map(p => p.prompt) }) });
+    PORT.history.push(r);
+    showPortrait(PORT.history.length - 1);
+    $("nPortraitMsg").textContent = "";
+  } catch (e) {
+    $("nPortraitMsg").textContent = "Couldn't paint it: " + e.message;
+    if (PORT.at < 0) $("nPortrait").textContent = "no portrait yet";
+  }
+  $("nPaint").disabled = false;
+  $("nRepaint").disabled = !PORT.history.length;
+}
+function showPortrait(i) {
+  if (i < 0 || i >= PORT.history.length) return;
+  PORT.at = i;
+  const p = PORT.history[i];
+  $("nPortrait").textContent = ""; $("nPortrait").style.backgroundImage = `url("${p.url}")`;
+  $("nAppearance").value = p.appearance;
+  $("nRepaint").disabled = false;
+  $("pNav").classList.toggle("hidden", PORT.history.length < 2);
+  $("pPrev").disabled = i === 0; $("pNext").disabled = i === PORT.history.length - 1;
+  $("pPos").textContent = `${i + 1} / ${PORT.history.length}`;
 }
 
 function saveCurrentEdit() {
@@ -458,8 +534,11 @@ function msgHTML(m, isLastUser, isLastGm) {
     const btns = [];
     if (isLastUser && !S.busy && canEditLast()) btns.push(`<button data-act="edit">Edit</button>`);
     if (unanswered && !S.busy) btns.push(`<button data-act="retry">↻ Retry</button>`);
-    return `<div class="msg user" data-id="${m.id}">${md(m.content)}
+    const bubble = `<div class="msg user" data-id="${m.id}">${md(m.content)}
       ${btns.length ? `<div class="meta actions">${btns.join(" ")}</div>` : ""}</div>`;
+    return S.data.portrait
+      ? `<div class="urow">${bubble}<img class="avatar" alt="" title="Your character (open the sheet)" src="/api/campaigns/${S.slug}/portraits/${S.data.portrait}"></div>`
+      : bubble;
   }
   const chips = [];
   if (m.injected?.length) chips.push(`<span class="chip" title="${esc(m.injected.join(", "))}">📜 ${m.injected.length} from archive</span>`);
@@ -542,6 +621,7 @@ function renderChat(scroll) {
   updateBackdrop();
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
+  $("view").querySelectorAll(".avatar").forEach(a => a.onclick = openSheet);
   $("view").querySelectorAll("[data-act=retry]").forEach(b => b.onclick = () => runTurn(`/api/campaigns/${S.slug}/regenerate`, null, null, "regenerate"));
   $("view").querySelectorAll("[data-act=edit]").forEach(b => b.onclick = () => editLast(lastUser));
   if (scroll) $("main").scrollTop = $("main").scrollHeight;
@@ -706,15 +786,22 @@ function startPoll() {
 
 // ---- archive drawer ------------------------------------------------------
 // ---- character sheet --------------------------------------------------------
-const SHEET_LABELS = { name: "Name", concept: "Concept", skills: "Skills", condition: "Condition (injuries, status)",
+const SHEET_LABELS = { name: "Name", concept: "Concept", appearance: "Appearance", skills: "Skills", condition: "Condition (injuries, status)",
   money: "Money", gear: "Gear", assets: "Assets (ships, vehicles, property)", companions: "Companions",
   obligations: "Obligations (debts, promises, enemies)" };
 async function openSheet() {
   $("drawerTitle").textContent = "Character";
   $("drawer").classList.add("open");
   const d = await api(`/api/campaigns/${S.slug}/character`);
+  const pt = S.imagesEnabled || S.data.portrait ? await api(`/api/campaigns/${S.slug}/portraits`) : null;
   const sh = d.sheet || {};
   $("drawerBody").innerHTML = `
+    ${pt ? `<div class="portraitbox">
+      <div class="pimg" id="shPortrait" style="${pt.current ? `background-image:url('/api/campaigns/${S.slug}/portraits/${pt.current}')` : ""}">${pt.current ? "" : "no portrait"}</div>
+      <div>${pt.enabled ? `<button id="shPaint">🎨 New portrait</button><div class="muted small">Uses the Appearance below: edit it first to change the look.</div>` : ""}
+        <div id="shPaintMsg" class="muted small"></div>
+        ${pt.all.length > 1 ? `<div class="thumbs">${pt.all.map(n => `<img src="/api/campaigns/${S.slug}/portraits/${n}" data-name="${n}" class="${n === pt.current ? "cur" : ""}" title="Use this one">`).join("")}</div>` : ""}
+      </div></div>` : ""}
     ${d.sheet ? "" : `<p class="muted">No sheet yet: the archivist starts one after the GM's first reply, or fill it in yourself.</p>`}
     ${d.fields.map(f => d.lists.includes(f)
       ? `<label>${SHEET_LABELS[f] || f} <span class="muted">(one per line)</span></label><textarea data-f="${f}" rows="${Math.max(2, (sh[f] || []).length + 1)}">${esc((sh[f] || []).join("\n"))}</textarea>`
@@ -723,6 +810,18 @@ async function openSheet() {
     <h3>Recent changes</h3>
     ${d.history.length ? `<ul>${d.history.map(h => `<li>${esc(h.what)} <span class="muted">· ${new Date(h.ts * 1000).toLocaleString()}</span></li>`).join("")}</ul>` : `<p class="muted">none yet</p>`}
     <p class="muted">The archivist updates this after each GM reply (money, gear, injuries, companions, debts). The GM sees it every turn and keeps to it.</p>`;
+  $("shPaint")?.addEventListener("click", async () => {
+    $("shPaint").disabled = true; $("shPaintMsg").textContent = "Painting… (~10–30 s)";
+    try {
+      const appearance = $("drawerBody").querySelector("[data-f=appearance]")?.value || "";
+      const r = await api(`/api/campaigns/${S.slug}/portraits`, { method: "POST", body: JSON.stringify({ appearance }) });
+      S.data.portrait = r.current; renderChat(false); openSheet();
+    } catch (e) { $("shPaintMsg").textContent = e.message; $("shPaint").disabled = false; }
+  });
+  $("drawerBody").querySelectorAll(".thumbs img").forEach(img => img.onclick = async () => {
+    await api(`/api/campaigns/${S.slug}/portrait`, { method: "PUT", body: JSON.stringify({ name: img.dataset.name }) });
+    S.data.portrait = img.dataset.name; renderChat(false); openSheet();
+  });
   $("saveSheet").onclick = async () => {
     const body = {};
     $("drawerBody").querySelectorAll("[data-f]").forEach(el => {
@@ -789,6 +888,7 @@ $("closeDrawer").onclick = () => $("drawer").classList.remove("open");
   try {
     const st = await api("/api/status");
     if (!st.configured) { location.href = "/admin"; return; }  // first run: set up models first
+    S.imagesEnabled = !!st.images;
   } catch {}
   const q = new URLSearchParams(location.search).get("c");
   q ? openCampaign(q).catch(showList) : showList();

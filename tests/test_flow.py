@@ -670,3 +670,47 @@ def test_audit_keeps_a_time_skip_in_the_same_place():
          "same_site": True, "time_skip_quote": "The next morning", "return_quote": "none", "reason": "r"}
     assert router.judge_boundary(v, after) == (True, "time skip narrated")
     assert router.judge_boundary({**v, "time_skip_quote": "none"}, after)[0] is False
+
+
+# ---- portraits --------------------------------------------------------------
+
+def test_portrait_from_setup_to_campaign_history(tmp_path, monkeypatch):
+    from rpg_llm import images
+    from rpg_llm.config import ImageGen
+
+    painted = []
+
+    async def fake_generate(cfg, prompt, width=512, height=512, **kw):
+        painted.append((prompt, width, height))
+        return b"RIFF-fake-webp-" + str(len(painted)).encode()
+
+    monkeypatch.setattr(images, "generate", fake_generate)
+    cfg = AppConfig(images=ImageGen(kind="comfyui", base_url="http://comfy:8188"))
+    desc = {"appearance": "Grey stubble, flight jacket.", "prompt": "a weathered courier"}
+    dm = FakeLLM([desc, desc, desc])
+    rt = Runtime(Settings(Env(vault_path=tmp_path), cfg), dm=dm, router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        r = client.post("/api/suggest/portrait", json={"system": "Traveller", "premise": "A courier."}).json()
+        assert r["appearance"] == "Grey stubble, flight jacket." and painted[0][1:] == (512, 512)
+        assert "science-fiction" in painted[0][0]  # the look follows the system
+        assert client.get(r["url"]).status_code == 200
+        slug = client.post("/api/campaigns", json={"name": "T", "system": "Traveller",
+                                                   "portrait": r["token"],
+                                                   "appearance": r["appearance"]}).json()["slug"]
+        assert client.get(f"/api/campaigns/{slug}").json()["portrait"] == "001.webp"
+        # a new one, with the player's own description
+        n = client.post(f"/api/campaigns/{slug}/portraits", json={"appearance": "Now with an eyepatch."}).json()
+        assert n["current"] == "002.webp" and n["appearance"] == "Now with an eyepatch."
+        lst = client.get(f"/api/campaigns/{slug}/portraits").json()
+        assert lst["all"] == ["001.webp", "002.webp"]
+        assert client.put(f"/api/campaigns/{slug}/portrait", json={"name": "001.webp"}).status_code == 200
+        assert client.get(f"/api/campaigns/{slug}").json()["portrait"] == "001.webp"
+        assert client.get(f"/api/campaigns/{slug}/portraits/001.webp").content.startswith(b"RIFF")
+        assert client.get(f"/api/campaigns/{slug}/portraits/../campaign.yaml").status_code == 404
+
+
+def test_portrait_needs_an_image_generator(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()), dm=FakeLLM(), router_llm=FakeLLM(),
+                 archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        assert client.post("/api/suggest/portrait", json={}).status_code == 409

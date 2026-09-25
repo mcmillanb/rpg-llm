@@ -59,6 +59,23 @@ class Role(BaseModel):
     thinking: bool = True  # DM only: False asks Qwen-style models to skip their reasoning
 
 
+class ImageGen(BaseModel):
+    """Optional image generator for portraits and scene art."""
+    kind: str = "none"  # none | comfyui | openai
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""  # openai-style APIs: the image model name
+    # comfyui: model files for the built-in Qwen-Image 2.1 workflow
+    unet: str = "qwen_image_2.1_bf16.safetensors"
+    clip: str = "qwen3vl_8b_int8_convrot.safetensors"
+    vae: str = "qwen_image_2.1_vae_bf16.safetensors"
+    steps: int = Field(20, ge=1, le=100)
+
+    @property
+    def enabled(self) -> bool:
+        return self.kind in ("comfyui", "openai") and bool(self.base_url.strip())
+
+
 class Tuning(BaseModel):
     live_tail_pct: float = Field(50.0, ge=5, le=95)
     router_threshold: float = Field(0.7, ge=0, le=1)
@@ -73,6 +90,7 @@ class AppConfig(BaseModel):
     router: Role = Role()
     archiver: Role = Role()
     tuning: Tuning = Tuning()
+    images: ImageGen = ImageGen()
     admin_password_hash: str | None = None
     secret: str = Field(default_factory=lambda: secrets.token_hex(16))  # signs admin cookies
 

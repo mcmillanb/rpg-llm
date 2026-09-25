@@ -274,7 +274,7 @@ information learned, and anything that only might happen. Keep entries short (a 
 numbers where known). Leave everything else exactly as it is.
 
 What each field holds, and nothing else:
-- name, concept: rarely change.
+- name, concept, appearance: rarely change (appearance: only lasting changes, like a new scar).
 - skills: abilities the character has shown or trained.
 - condition: the player character's OWN body and legal status only: injuries, illness,
   fatigue, "wanted by port authority". NOT story facts ("Senn is watching", "tamper line found
@@ -314,7 +314,8 @@ Game / setting: {system}
 Premise:
 {premise}
 
-Return JSON with the fields: name, concept, skills, condition (empty unless the premise says
+Return JSON with the fields: name, concept, appearance (how they look, 1-2 sentences; use the
+premise's description if it has one), skills, condition (empty unless the premise says
 otherwise), money, gear, assets, companions, obligations."""
 
 ARC_TASK = """\
@@ -364,3 +365,17 @@ Newly filed scenes:
 
 Return JSON: diverged (bool: did play go meaningfully off the arc?), reason (one sentence), arc
 (the full updated markdown)."""
+
+PORTRAIT_TASK = """\
+Describe the player character of a solo tabletop RPG for a portrait painting.
+
+Game / setting: {system}
+Premise:
+{premise}
+{appearance}{avoid}
+Return JSON:
+- appearance: 1-2 sentences on how the character looks: apparent age, build, face, hair,
+  clothing and one distinctive detail. Keep to anything the premise says; invent the rest to fit.
+- prompt: an image prompt of 40-70 words for a head-and-shoulders portrait: the appearance,
+  expression and pose, plus a hint of a background from their world. Visual description only:
+  no names, no story, no text in the image."""

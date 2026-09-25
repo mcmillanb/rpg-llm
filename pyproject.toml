@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "httpx2>=2.13.1",
     "openai>=3.19.2",
+    "pillow>=12.3.0",
     "pydantic-settings>=2.15.0",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",

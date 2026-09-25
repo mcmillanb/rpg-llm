@@ -20,9 +20,9 @@ from rpg_llm.vault import Campaign
 FILE = "character.yaml"
 HISTORY = "character.history.jsonl"
 LISTS = ("skills", "condition", "gear", "assets", "companions", "obligations")
-TEXTS = ("name", "concept", "money")
-FIELDS = ("name", "concept", "skills", "condition", "money", "gear", "assets", "companions",
-          "obligations")
+TEXTS = ("name", "concept", "appearance", "money")
+FIELDS = ("name", "concept", "appearance", "skills", "condition", "money", "gear", "assets",
+          "companions", "obligations")
 
 SHEET_SCHEMA = {
     "type": "object",
@@ -166,4 +166,6 @@ async def create_start(campaign: Campaign, archiver: LLMClient) -> dict | None:
         SHEET_SCHEMA, max_tokens=1200)
     if load(campaign) is not None:  # the first turn's update got there first
         return None
+    if campaign.meta.get("appearance"):  # chosen with the portrait during setup
+        data["appearance"] = campaign.meta["appearance"]
     return save(campaign, data, 0, "starting sheet from the premise")
