@@ -8,6 +8,7 @@ what that turn did to the sheet.
 """
 
 import json
+import re
 import time
 
 import yaml
@@ -60,6 +61,19 @@ def clean(data: dict) -> dict:
         else:
             out[k] = str(v or "").strip()
     return out
+
+
+MAX_ITEMS = 12
+
+
+def guard(old: dict | None, new: dict) -> dict:
+    """Protect the sheet from a small model's slips: a known amount of money never turns into
+    one without a number, and lists stay short."""
+    if old and re.search(r"\d", old.get("money", "")) and not re.search(r"\d", new.get("money", "")):
+        new["money"] = old["money"]
+    for k in LISTS:
+        new[k] = new[k][:MAX_ITEMS]
+    return new
 
 
 def load(campaign: Campaign) -> dict | None:
@@ -130,7 +144,7 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str) -> d
                                UPDATE_SCHEMA, max_tokens=1500)
     if campaign.messages()[-1]["id"] != messages[-1]["id"]:
         return None  # the turn was taken back meanwhile
-    new = clean(result.get("sheet") or {})
+    new = guard(current, clean(result.get("sheet") or {}))
     if current is not None and (not result.get("changed") or new == current):
         return None
     if not new.get("name") and current is None:

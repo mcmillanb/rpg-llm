@@ -1,0 +1,24 @@
+name: Tomas Reyes
+concept: Freelance Trader / Former Scout Courier
+skills:
+- Pilot (Space)
+- Pilot (Atmospheric)
+- Mechanics (Spacecraft)
+- Negotiation
+- Security
+- Streetwise
+condition: []
+money: 450 cr
+gear:
+- Sealed Diplomatic Pouch
+- Standard Sidearm
+- Courier's Logbook
+- Personal Effects
+assets:
+- Lantern (Type-A Free Trader)
+companions:
+- Ilse (Engineer)
+obligations:
+- Deliver sealed diplomatic pouch to noble on Regina
+- Resolve customs inspection at Mora downport
+- Dispute with noble's household regarding pouch origin

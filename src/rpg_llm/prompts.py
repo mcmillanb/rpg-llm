@@ -252,22 +252,32 @@ Cover, in 120-180 words of plain prose (no headings, no lists):
 Leave room for the player: don't decide what they do next. Write only the premise."""
 
 SHEET_TASK = """\
-Task: keep the player character's sheet up to date. Apply only concrete changes that the LATEST
-exchange actually establishes (in the GM's narration, or stated by the player and not refused):
-money spent or earned, items gained, lost, used up or broken, injuries or conditions gained or
-healed, companions joining or leaving, assets (ships, vehicles, property) gained or damaged,
-debts, promises and enemies made or settled, and newly shown skills. Ignore plans, offers not
-yet accepted, and anything that only might happen. Keep every entry short (a few words, with
-numbers where known: "Cr 1,200", "medkit (2 uses)", "cracked rib"). Remove what no longer
-applies. Leave the rest of the sheet exactly as it is.
+Task: keep the player character's sheet up to date. It is a record of the CHARACTER's own
+resources and state, not of the story (the wiki records the story).
 
-Money is the amount the character has now. If it isn't known, never invent a starting amount or
-go negative: write e.g. "unknown (spent Cr 295 so far)". List in "changes" only things that
-actually changed, never "no change" or "+0".
+Apply only concrete changes that the LATEST exchange actually establishes (in the GM's
+narration, or stated by the player and not refused). Ignore plans, offers not yet accepted,
+information learned, and anything that only might happen. Keep entries short (a few words,
+numbers where known). Leave everything else exactly as it is.
 
-Fields: name, concept (one line: who they are), skills, condition (injuries, fatigue, status
-effects; empty if fine), money, gear, assets, companions, obligations (debts, promises, enemies,
-deadlines).
+What each field holds, and nothing else:
+- name, concept: rarely change.
+- skills: abilities the character has shown or trained.
+- condition: the player character's OWN body and legal status only: injuries, illness,
+  fatigue, "wanted by port authority". NOT story facts ("Senn is watching", "tamper line found
+  on the pouch"), NOT other people ("Ilse is shaken"), NOT knowledge or suspicions.
+- money: the character's current funds as an amount, e.g. "Cr 450". When they pay or receive
+  money, do the arithmetic and write the new amount ("Cr 450" and pays Cr 200 -> "Cr 250").
+  Money owed to or by someone is NOT money: put it in obligations.
+- gear: items they carry or own (with charges, damage).
+- assets: ships, vehicles, property.
+- companions: people travelling or working with them.
+- obligations: things the character OWES or MUST do for someone else: debts, promises made,
+  deadlines, summonses, sworn enemies. NOT their own plans, tactics or intentions ("claim the
+  seal is forged", "never admit X", "call Maren") and NOT clues. Remove ones settled.
+
+Keep each list to the dozen most important entries. When in doubt, leave it off the sheet:
+the story itself is recorded elsewhere.
 
 Current sheet:
 {sheet}

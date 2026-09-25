@@ -603,3 +603,12 @@ def test_turn_stats_count_context_once_across_tool_rounds(tmp_path):
         st = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]["stats"]
         assert (st["prompt_tokens"], st["cached_tokens"], st["rounds"]) == (5000, 4000, 2)
         assert st["prompt_ms"] == 200 and st["completion_tokens"] == 100
+
+
+def test_sheet_guard_keeps_known_money_and_caps_lists():
+    from rpg_llm import sheet
+    old = {**sheet.blank(), "money": "Cr 450"}
+    new = {**sheet.blank(), "money": "unknown", "gear": [f"item {i}" for i in range(30)]}
+    g = sheet.guard(old, new)
+    assert g["money"] == "Cr 450" and len(g["gear"]) == sheet.MAX_ITEMS
+    assert sheet.guard(old, {**sheet.blank(), "money": "Cr 250"})["money"] == "Cr 250"
