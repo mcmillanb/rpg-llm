@@ -83,13 +83,14 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=25)
     ap.add_argument("--seed-offset", type=int, default=0)
     ap.add_argument("--quality", type=int, default=78)
+    ap.add_argument("--out", type=Path, default=OUT, help="folder to write into (default: the app's)")
     a = ap.parse_args()
     for theme, t in themes.THEMES.items():
         for setting in t["settings"]:
             key = f"{theme}/{setting}"
             if a.only and not any(key == o or theme == o for o in a.only):
                 continue
-            dest = OUT / theme / f"{setting}.webp"
+            dest = a.out / theme / f"{setting}.webp"
             if dest.exists() and not a.force:
                 print(f"skip {key} (exists)")
                 continue

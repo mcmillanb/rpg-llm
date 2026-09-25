@@ -100,7 +100,7 @@ pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--
 /* ---- themed play page: painted backdrop per genre and setting ---------------------------- */
 .backdrop, .backdrop-shade { position: fixed; inset: 0; z-index: 0; pointer-events: none; display: none; }
 .backdrop { background: center / cover no-repeat; opacity: 0; transition: opacity 1.6s ease;
-  filter: brightness(1.25) saturate(1.08); }
+  filter: brightness(1.05); }
 .backdrop.on { opacity: 1; }
 .backdrop-shade { background: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,.3) 14%,
   rgba(0,0,0,.42) 50%, rgba(0,0,0,.3) 86%, rgba(0,0,0,0)); }
@@ -150,7 +150,7 @@ body[data-look="cyberpunk"] {
 .gcard:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(0,0,0,.25); }
 .gcard.art { color: #f2efe8; background: #000; }
 .gcard.art::before, .gcard.art::after { content: ""; position: absolute; inset: 0; }
-.gcard.art::before { background: var(--art) center / cover; filter: brightness(1.35) saturate(1.1); }
+.gcard.art::before { background: var(--art) center / cover; filter: brightness(1.1); }
 .gcard.art::after { background: linear-gradient(to top, rgba(0,0,0,.8) 8%, rgba(0,0,0,.15) 55%, rgba(0,0,0,0)); }
 .gcard .gbody, .gcard .del { position: relative; z-index: 1; }
 .gcard .del { position: absolute; }

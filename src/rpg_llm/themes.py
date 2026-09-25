@@ -8,9 +8,10 @@ too, so scripts/make_backdrops.py can regenerate the pack with a local image mod
 import re
 
 STYLE = ("Wide cinematic painted backdrop for a {genre} role-playing game. {scene}. The centre "
-         "of the image is dark and calm with little detail, leaving room for text; the points of "
-         "interest sit near the left and right edges. Muted, desaturated palette of {palette}, "
-         "soft painterly style, no text, no interface, no people in the foreground.")
+         "of the image is calmer, with less detail, leaving room for text; the points of interest "
+         "sit near the left and right edges. Well lit and clearly visible, with a rich, vibrant "
+         "palette of {palette}, soft painterly style, no text, no interface, no people in the "
+         "foreground.")
 NEGATIVE = ("text, letters, words, readable signs, watermark, logo, user interface, frame, "
             "border, bright busy centre, people in the foreground, close-up faces")
 
@@ -18,7 +19,7 @@ THEMES = {
     "scifi": {
         "label": "Science fiction",
         "genre": "science-fiction",
-        "palette": "deep navy, slate and cool amber",
+        "palette": "vivid deep blues and teals with warm amber highlights",
         "matches": ["sci-fi", "science", "space", "traveller", "star", "expanse", "mothership"],
         "settings": {
             "space": "Deep space in transit: a dense but subtle starfield, a faint blue-violet "
@@ -41,7 +42,7 @@ THEMES = {
     "fantasy": {
         "label": "Fantasy",
         "genre": "fantasy",
-        "palette": "deep forest green, umber and dusk gold",
+        "palette": "lush greens, golden light and warm earth tones",
         "matches": ["fantasy", "dungeons", "d&d", "pathfinder", "dark eye", "exalted"],
         "settings": {
             "wilds": "Wild northern country at dusk: pine forest and misty hills along the edges, "
@@ -60,7 +61,7 @@ THEMES = {
     "horror": {
         "label": "Gothic horror",
         "genre": "gothic horror",
-        "palette": "near-black, bone white, moonlit grey-blue and a touch of candle gold",
+        "palette": "moonlit blues, bone white and warm candle gold, moody but clearly visible",
         "matches": ["horror", "gothic", "cthulhu", "vampire", "wraith", "werewolf", "changeling",
                     "heist", "blades"],
         "settings": {
@@ -81,7 +82,7 @@ THEMES = {
     "cyberpunk": {
         "label": "Cyberpunk",
         "genre": "cyberpunk",
-        "palette": "black and deep indigo with neon magenta and cyan accents",
+        "palette": "vivid neon magenta, cyan and electric blue against the night",
         "matches": ["cyberpunk", "shadowrun", "cyber", "neon"],
         "settings": {
             "street": "A rain-soaked megacity street at night: towering buildings with glowing "
