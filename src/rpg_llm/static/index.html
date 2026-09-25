@@ -542,6 +542,14 @@ function showSuggestion(i) {
   NEW.at = i;
   $("nPremise").value = NEW.history[i];
   updateHistNav();
+  premiseChanged();
+}
+// A different premise means a different character: forget the appearance the GM wrote for the
+// old one, so the next portrait is described from the new premise (the current image stays).
+function premiseChanged() {
+  if (!$("nAppearance") || !$("nAppearance").value) return;
+  $("nAppearance").value = "";
+  if (PORT.at >= 0) $("nPortraitMsg").textContent = "New premise: the next portrait will be based on it.";
 }
 function updateHistNav() {
   const n = NEW.history.length;
