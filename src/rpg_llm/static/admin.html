@@ -61,6 +61,13 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: v
 .stats { font-size: 13px; color: var(--muted); }
 .job { font-size: 13px; padding: 8px 0; border-top: 1px solid var(--line); }
 .job:first-child { border-top: 0; }
+details.guide summary { cursor: pointer; }
+details.guide table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0; }
+details.guide th, details.guide td { text-align: left; vertical-align: top; padding: 6px 8px;
+  border-top: 1px solid var(--line); }
+details.guide td:first-child { color: var(--muted); white-space: nowrap; }
+details.guide code { font-size: 12px; }
+@media (max-width: 620px) { details.guide table { display: block; overflow-x: auto; } }
 pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 60vh; overflow-y: auto; }
 </style>
@@ -92,6 +99,20 @@ pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; 
     <h2>Models</h2>
     <p class="muted">Pick which model does each job. The router runs every turn and should be small and fast;
       the archiver writes the wiki between sessions and benefits from the bigger model.</p>
+    <details class="card guide">
+      <summary><strong>Recommended server settings</strong> <span class="muted">(context size, slots, cache: read this before tuning your model servers)</span></summary>
+      <p class="muted">Figures are from real play on llama.cpp with Qwen 27B (game master) and Qwen 9B (router). Other servers have equivalents.</p>
+      <table>
+        <tr><th></th><th>Game master</th><th>Router</th><th>Archiver</th></tr>
+        <tr><td>Context per slot</td><td><strong>64k</strong> recommended, 32k minimum</td><td><strong>16–32k</strong>, 16k minimum</td><td>same as the game master (usually is the game master)</td></tr>
+        <tr><td>Why</td><td>brief + current scene + notes. The live context budget (Tuning) condenses the scene before it outgrows the window; a long scene reached ~25k tokens in testing.</td><td>fixed prompt (instructions, brief, wiki index: grows ~50 tokens per wiki entry) plus a few recent exchanges.</td><td>reads one whole finished scene at a time: needs room for your longest scene plus ~5k.</td></tr>
+        <tr><td>Slots (<code>--parallel</code>)</td><td><strong>2</strong>: one for play, one for filing/suggestions, so filing never evicts your play cache</td><td><strong>2</strong>: the before-turn check needn't queue behind the after-reply check</td><td>(uses the game master's second slot)</td></tr>
+        <tr><td>Host prompt cache (<code>--cache-ram</code>, MiB)</td><td><strong>8192 or more.</strong> When another request takes a slot, llama.cpp parks the idle slot's state in RAM. For a 27B hybrid model that state is ~2.4 GB at 20k tokens and grows with the story; if it doesn't fit it's dropped, and the next turn re-reads the whole prompt (minutes instead of seconds).</td><td>2048 is plenty (states of 0.3–0.9 GB)</td><td>n/a</td></tr>
+        <tr><td>Other</td><td>tool calling on (llama.cpp <code>--jinja</code>); a thinking budget of ~1024 tokens (<code>--reasoning-budget</code>) keeps the first words from taking 30 s+, or untick “let the model think”</td><td>JSON-schema output; thinking is turned off per request (<code>--reasoning-budget 0</code> as a server default too)</td><td>JSON-schema output</td></tr>
+      </table>
+      <p class="muted">Note: with llama.cpp, <code>--ctx-size</code> may be the total shared across all slots, not per slot. Check <code>/slots</code> on the server, and if the Test button reports more than one slot actually holds, enter the per-slot size as the context override.
+        LM Studio and similar servers that run one model at a time: give each job its own server, or point the router and archiver at the game master's model (“same as the game master”) so it never has to swap.</p>
+    </details>
     <div id="roles"></div>
 
     <h2>Tuning</h2>
@@ -151,8 +172,8 @@ pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const ROLES = [
-  ["dm", "Game master", "Runs the game. Needs tool calling (llama.cpp: --jinja). Recommended context: ~64k per slot."],
-  ["router", "Router", "Runs before and after every turn: scene tracking and what to recall. Small and fast (e.g. an 8B). ~16–32k context."],
+  ["dm", "Game master", "Runs the game. Needs tool calling (llama.cpp: --jinja). 64k context per slot recommended, 32k minimum; see the settings guide above."],
+  ["router", "Router", "Runs before and after every turn: scene tracking, what to recall, the character sheet. Small and fast (e.g. a 9B). 16–32k context."],
   ["archiver", "Archiver", "Writes scene notes, the wiki and the brief between sessions. Quality matters more than speed."],
 ];
 let CFG = null;           // config as loaded / edited
@@ -322,6 +343,7 @@ function renderRoles() {
           `reply: “${esc(t.reply)}” in ${t.reply_seconds}s${t.thinks ? " (with thinking)" : ""}`,
           "tool_calling" in t ? `tool calling: ${t.tool_calling ? "yes" : '<span class="bad">no</span>'}` : `JSON output: ${t.json_output ? `yes (${t.json_seconds}s)` : '<span class="bad">no</span>'}`,
           t.note ? `<span class="bad">${esc(t.note)}</span>` : "",
+          ...(t.warnings || []).map(w => `<span class="bad">⚠ ${esc(w)}</span>`),
         ].filter(Boolean).join("<br>");
       } catch (err) { out.innerHTML = `<span class="bad">✗ ${esc(err.message)}</span>`; }
       e.target.disabled = false;

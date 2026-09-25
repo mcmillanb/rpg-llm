@@ -131,6 +131,8 @@ async def _list_models(base_url: str, api_key: str) -> dict:
     return {"ok": False, "error": last_error}
 
 
+MIN_CONTEXT = {"dm": 32768, "router": 16384, "archiver": 32768}
+
 LOOKUP_TOOL = {"type": "function", "function": {
     "name": "lookup", "description": "Look up a person or place in the campaign wiki",
     "parameters": {"type": "object", "properties": {"name": {"type": "string"}},
@@ -174,6 +176,10 @@ async def _test_role(cfg: AppConfig, role: str) -> dict:
             out["json_output"] = isinstance(v.get("transition"), bool)
             out["json_seconds"] = round(time.time() - t, 1)
         out["ok"] = bool(out["reply"]) and out.get("tool_calling", out.get("json_output", True))
+        minimum = MIN_CONTEXT.get(role)
+        ctx = out.get("context_window")
+        out["warnings"] = [f"context window {ctx:,} tokens is below the {minimum:,} minimum for "
+                           f"this job (see Recommended server settings)"] if ctx and ctx < minimum else []
     except Exception as e:
         out.update(ok=False, error=f"{type(e).__name__}: {e}")
     return out
