@@ -61,6 +61,8 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: v
 .stats { font-size: 13px; color: var(--muted); }
 .job { font-size: 13px; padding: 8px 0; border-top: 1px solid var(--line); }
 .job:first-child { border-top: 0; }
+pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 60vh; overflow-y: auto; }
 </style>
 </head>
 <body>
@@ -386,6 +388,7 @@ async function loadCampaigns() {
         <button data-act="edit">Edit</button>
         <button data-act="compact" ${c.busy ? "disabled" : ""} title="Normally automatic after the idle time">File closed scenes now</button>
         <button data-act="rebuild" ${c.busy ? "disabled" : ""} title="Throw the wiki away and rewrite it from the transcript">Rebuild wiki</button>
+        <button data-act="arc" title="The GM's hidden plan for the story">Story arc (spoilers)</button>
         <button data-act="delete" class="danger" ${c.busy ? "disabled" : ""}>Delete</button>
       </div>
       <div class="result" data-msg></div>
@@ -408,6 +411,17 @@ async function loadCampaigns() {
       if (!confirm("Rebuild the whole wiki from the transcript? Scene boundaries are kept; notes, index, timeline and brief are rewritten. About 40 s per scene.")) return;
       try { await api(`/api/admin/campaigns/${slug}/rebuild`, { method: "POST" }); loadCampaigns(); loadJobs(); }
       catch (e) { msg.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+    };
+    card.querySelector("[data-act=arc]").onclick = async () => {
+      if (!confirm("Show the GM's hidden story arc? It contains spoilers for your own campaign.")) return;
+      const a = await api(`/api/admin/campaigns/${slug}/arc`);
+      msg.innerHTML = `${a.text ? `<pre class="arc">${esc(a.text)}</pre><div class="muted">${a.versions} earlier version(s) kept in arc-history/</div>` : `<div class="muted">No story arc yet.</div>`}
+        <div class="actions"><button data-act="arcNew">${a.text ? "Write a new arc" : "Write a story arc"}</button><button data-act="arcHide">Hide</button></div>`;
+      msg.querySelector("[data-act=arcHide]").onclick = () => { msg.innerHTML = ""; };
+      msg.querySelector("[data-act=arcNew]").onclick = async () => {
+        if (a.text && !confirm("Replace the current arc with a new one? (The old one is kept in arc-history/.)")) return;
+        await api(`/api/admin/campaigns/${slug}/arc`, { method: "POST" }); msg.innerHTML = ""; loadJobs();
+      };
     };
     card.querySelector("[data-act=delete]").onclick = async () => {
       if (!confirm("Delete this campaign? It is moved to the vault's trash folder, not erased.")) return;

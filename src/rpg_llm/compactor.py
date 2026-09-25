@@ -9,7 +9,7 @@ import logging
 import re
 import time
 
-from rpg_llm import prompts, router, wiki
+from rpg_llm import arc, prompts, router, wiki
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, State, slugify
 
@@ -158,6 +158,12 @@ async def compact(campaign: Campaign, router_llm: LLMClient, archiver: LLMClient
     if filed:
         await pause()
         await rewrite_brief(campaign, archiver, filed)
+        await pause()
+        try:
+            report["arc"] = await arc.revise(campaign, archiver, filed)
+        except Exception as e:  # the arc is guidance; never fail a filing over it
+            log.warning("arc revision failed: %r", e)
+            report["arc"] = {"error": str(e)}
     async with lock:
         state = campaign.load_state()
         if state.fold and state.fold["until"] < state.live_start():

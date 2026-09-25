@@ -4,6 +4,8 @@ Order is chosen for prompt caching: everything that is stable between turns come
 the per-turn GM notes ride on the final user message, so the server only processes new text.
 """
 
+import re
+
 from rpg_llm import prompts
 from rpg_llm.vault import Campaign, State, estimate_tokens
 
@@ -26,7 +28,7 @@ def system_prompt(campaign: Campaign, state: State) -> str:
     system = meta.get("system") or ""
     extra = meta.get("dm_instructions") or ""
     t = table(meta)
-    arc = campaign.read("arc.md").strip()
+    arc = re.sub(r"\n*<!--.*?-->\s*$", "", campaign.read("arc.md"), flags=re.S).strip()
     text = prompts.DM_SYSTEM.format(
         system_line=f"\nGame system / setting: {system}\n" if system else "",
         extra=f"\nAdditional instructions from the player:\n{extra}\n" if extra else "",

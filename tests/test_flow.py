@@ -557,3 +557,31 @@ def test_player_can_edit_the_sheet_and_it_rides_in_gm_notes(tmp_path):
         assert last.startswith("[GM NOTES]") and "Money: Cr 50" in last
         h = client.get(f"/api/campaigns/{slug}/character").json()["history"]
         assert h[0]["what"] == "edited by the player"
+
+
+# ---- story arc --------------------------------------------------------------
+
+def test_arc_is_in_the_gm_prompt_but_never_served_to_the_player(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()))
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        c = rt.vault.get(slug)
+        c.write("arc.md", "## Core conflict\nThe broker is the villain.\n\n<!-- stamp -->\n")
+        assert "The broker is the villain." in context.system_prompt(c, c.load_state())
+        assert "<!--" not in context.system_prompt(c, c.load_state())
+        for path in ("arc.md", "./arc.md", "arc-history/001.md"):
+            assert client.get(f"/api/campaigns/{slug}/file", params={"path": path}).status_code == 403
+        assert "villain" in client.get(f"/api/admin/campaigns/{slug}/arc").json()["text"]
+
+
+async def test_arc_revision_keeps_history_and_refuses_truncated_answers(vault):
+    from rpg_llm import arc
+    c = vault.create("T")
+    c.write("arc.md", "## Core conflict\n" + "x" * 400)
+    c.write("scenes/001-a.md", "# Scene 1\n\nThey fled.\n")
+    filed = [{"note": "scenes/001-a.md"}]
+    r = await arc.revise(c, FakeLLM([{"diverged": True, "reason": "fled", "arc": "## Core conflict\n" + "y" * 400}]), filed)
+    assert r["diverged"] and "y" * 50 in c.read("arc.md") and "revised: fled" in c.read("arc.md")
+    assert "x" * 50 in c.read("arc-history/001.md")
+    r = await arc.revise(c, FakeLLM([{"diverged": True, "reason": "?", "arc": "short"}]), filed)
+    assert "skipped" in r["reason"] and "y" * 50 in c.read("arc.md")

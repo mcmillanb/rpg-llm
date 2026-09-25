@@ -12,7 +12,7 @@ import httpx2
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from rpg_llm import compactor, context, router
+from rpg_llm import arc, compactor, context, router
 from rpg_llm.config import ROLES, AppConfig, NotConfigured, Role, Server, Tuning
 from rpg_llm.importers import openwebui
 from rpg_llm.llm import LLMClient
@@ -286,6 +286,25 @@ def register(app: FastAPI, R) -> None:
             raise HTTPException(409, "already filing this campaign")
         return start_job(rt, "rebuild", c, f"Rebuild wiki: {c.meta.get('name')}",
                          lambda job: _rebuild(rt, c, job))
+
+    @app.get("/api/admin/campaigns/{slug}/arc", dependencies=auth)
+    async def get_arc(slug: str):
+        c = R().campaign(slug)
+        hist = sorted(p.name for p in c.path(arc.HISTORY_DIR).glob("*.md")) \
+            if c.path(arc.HISTORY_DIR).exists() else []
+        return {"text": c.read(arc.FILE), "versions": len(hist)}
+
+    @app.post("/api/admin/campaigns/{slug}/arc", dependencies=auth)
+    async def new_arc(slug: str):
+        rt = R()
+        rt.require_configured()
+        c = rt.campaign(slug)
+
+        async def work(job):
+            job["progress"] = "writing the story arc (about a minute)…"
+            await arc.generate(c, rt.archiver)
+            return {"arc": "written"}
+        return start_job(rt, "arc", c, f"Story arc: {c.meta.get('name')}", work)
 
     # ---- import ---------------------------------------------------------------
 

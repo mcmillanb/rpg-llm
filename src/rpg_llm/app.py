@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import admin, compactor, context, dice, router, sheet, suggest, wiki
+from rpg_llm import admin, arc, compactor, context, dice, router, sheet, suggest, wiki
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -371,8 +371,12 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         t = context.table({"consequences": body.consequences, "dice": body.dice})
         c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t})
         rt = R()
-        if rt.configured and body.premise.strip():
-            rt.spawn(rt.run_quietly(sheet.create_start(c, rt.archiver), "starting sheet"))
+        if rt.configured:
+            async def setup():
+                if body.premise.strip():
+                    await rt.run_quietly(sheet.create_start(c, rt.archiver), "starting sheet")
+                await rt.run_quietly(arc.generate(c, rt.archiver), "story arc")
+            rt.spawn(setup())
         return {"slug": c.slug}
 
     @app.delete("/api/campaigns/{slug}")
@@ -421,6 +425,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         c = R().campaign(slug)
         if not path.endswith((".md", ".yaml")):
             raise HTTPException(400, "markdown or yaml only")
+        if arc.is_private(path):
+            raise HTTPException(403, "that's for the GM's eyes only")
         try:
             return {"path": path, "text": c.read(path)}
         except ValueError as e:

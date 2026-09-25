@@ -293,3 +293,51 @@ Premise:
 
 Return JSON with the fields: name, concept, skills, condition (empty unless the premise says
 otherwise), money, gear, assets, companions, obligations."""
+
+ARC_TASK = """\
+You are preparing a solo tabletop RPG campaign as its game master. Write the hidden story arc:
+GM-only notes the player will never see, used as guidance while running the game, not a script.
+It must fit the game, the premise and the stakes, and leave the player free to go anywhere:
+design situations and pressures, not a sequence of required actions. The player character
+belongs to the player: don't invent their past, relatives, feelings or decisions beyond what the
+premise states. Secrets are about the world and other people.
+
+Game / setting: {system}
+Stakes: {consequences}
+{situation}
+Write markdown with these sections, about 450-650 words in total:
+## Core conflict
+What is really going on beneath the premise, and why it matters to the character.
+## Factions and major NPCs
+4-6 entries: name, what they want, how they will act on the character.
+## Beats
+6-9 possible developments in rough order (early / middle / late), each a situation or
+revelation that can reach the character several different ways.
+## Possible climaxes
+2-3 different ways it could come to a head, depending on the player's choices.
+## Secrets
+3-5 truths the player can uncover, and where the clues are.
+## Progress
+What has happened so far against this arc (for a new campaign: "Not started.")."""
+
+ARC_REVISE_TASK = """\
+You are the game master's archivist. Below is the hidden story arc (GM-only) and what has
+happened in play since it was last updated. Update the arc:
+- Always rewrite "## Progress": which beats have happened or been skipped, briefly.
+- If play has diverged from the arc (the player went elsewhere, killed or befriended a key NPC,
+  solved or ignored a thread), revise the remaining beats, NPCs and climaxes so they grow out of
+  where the story actually is now. Never try to force the player back onto the old path.
+- Keep what still works; don't reinvent the core conflict unless play has made it irrelevant.
+- Keep the same sections and a similar length.
+
+Current arc:
+{arc}
+
+Campaign brief (current situation):
+{brief}
+
+Newly filed scenes:
+{scenes}
+
+Return JSON: diverged (bool: did play go meaningfully off the arc?), reason (one sentence), arc
+(the full updated markdown)."""
