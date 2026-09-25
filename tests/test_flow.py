@@ -75,7 +75,9 @@ def test_prompt_starts_at_first_unfiled_scene_and_notes_ride_last_message(vault)
 # ---- scene tracking ---------------------------------------------------------
 
 def verdict(transition, confidence, new_location=None):
+    # the evidence must appear in the GM's reply; test replies say "...at the ship."
     return {"transition": transition, "confidence": confidence, "reason": "r",
+            "movement_quote": "at the ship" if transition else "none",
             "new_location": new_location, "scene_title": "Old scene" if transition else None,
             "location_now": new_location or "bar"}
 
@@ -96,24 +98,36 @@ async def test_track_opens_scene_only_above_threshold(vault):
 
 async def test_regenerate_undoes_scene_opened_by_that_exchange(vault):
     c = vault.create("Test")
-    play(c, ("a", "A"), ("we leave", "You arrive."))
+    play(c, ("a", "A"), ("we leave", "You arrive at the ship."))
     await router.track(c, FakeLLM([verdict(True, 0.9, "ship")]), threshold=0.7)
     router.undo_scenes_from(c, 3)
     s = c.load_state().scenes
     assert len(s) == 1 and s[0].status == "open"
 
 
-async def test_audit_merges_a_wrong_boundary(vault):
+async def test_audit_keeps_real_moves_and_undoes_announced_or_reversed_ones(vault):
     c = vault.create("Test")
-    play(c, ("a", "A"), ("b", "B"), ("c", "C"))
-    c.save_state(State(scenes=[Scene(1, 1, "closed_provisional"), Scene(2, 3, "closed_provisional"),
-                               Scene(3, 5)]))
-    llm = FakeLLM([{"keep": False, "confidence": 0.9, "reason": "went straight back"},
-                   {"keep": True, "confidence": 0.9, "reason": "fine"}])
-    await router.audit(c, llm)
+    play(c, ("a", "At the bar."),
+         ("I head to the ship", "You stay at the bar a moment longer."),    # announced only
+         ("fine, I go now", "You walk out and board the Sparrow."),         # a real move
+         ("c", "Aboard, Ilse waves."),
+         ("I go to the market", "You take the lift down to the market."),   # moved...
+         ("no, back", "You ride the lift straight back up to the Sparrow."))  # ...and went back
+    c.save_state(State(scenes=[Scene(1, 1, "closed_provisional", location="bar"),
+                               Scene(2, 3, "closed_provisional", location="ship"),
+                               Scene(3, 5, "closed_provisional", location="Sparrow"),
+                               Scene(4, 9, location="market")]))
+    ev = lambda move, before, after, back="none": {
+        "place_before": before, "movement_quote": move, "place_after": after,
+        "same_site": False, "return_quote": back, "reason": "r"}
+    llm = FakeLLM([ev("none", "bar", "bar"),                              # not a move
+                   ev("board the Sparrow", "bar", "Sparrow"),              # keep
+                   ev("take the lift down to the market", "Sparrow", "market",
+                      back="ride the lift straight back up to the Sparrow")])  # went back
+    results = await router.audit(c, llm)
+    assert [r["keep"] for r in results] == [False, True, False]
     s = c.load_state().scenes
-    assert [(x.id, x.start, x.status) for x in s] == [(1, 1, "closed_provisional"), (2, 5, "open")]
-    assert s[1].audited
+    assert [(x.start, x.status) for x in s] == [(1, "closed_provisional"), (5, "open")]
 
 
 # ---- compaction -------------------------------------------------------------
@@ -260,7 +274,7 @@ def test_openwebui_import_follows_visible_branch_and_splits_reasoning(vault, tmp
 
 async def test_backfill_segments_history_and_resumes(vault):
     c = vault.create("Test")
-    play(c, ("a", "A"), ("go", "At the ship."), ("b", "B"))
+    play(c, ("a", "A"), ("go", "You arrive at the ship."), ("b", "B"))
     # the opening exchange only sets the location, so it can't open a scene even if asked
     llm = FakeLLM([verdict(True, 0.9, "bar"), verdict(True, 0.9, "ship"), verdict(False, 0.9)])
     assert await router.backfill(c, llm, 0.7) == 1
@@ -286,7 +300,7 @@ async def test_fold_condenses_oldest_live_messages_and_survives_scene_change(vau
 
     # a scene change must not bring the condensed messages back
     c.append({"role": "user", "content": "we leave"})
-    c.append({"role": "assistant", "content": "At the ship."})
+    c.append({"role": "assistant", "content": "You arrive at the ship."})
     await router.track(c, FakeLLM([verdict(True, 0.9, "ship")]), threshold=0.7)
     assert c.load_state().fold is not None
 

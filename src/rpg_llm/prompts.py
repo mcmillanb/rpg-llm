@@ -149,17 +149,27 @@ Return JSON: reason (one sentence, written first), notes (list of wiki paths fro
 scenes (list of scene ids)."""
 
 AUDIT_TASK = """\
-Task: an earlier pass decided that a new scene began at the exchange marked >>> below. With
-hindsight from what happened next, is that still correct? Say it is wrong if the player
-immediately went back, if the story carried on in the same place and moment, or if later lines
-depend on the earlier scene still being in progress.
+Task: an earlier pass decided a new scene began at the exchange marked >>> below. Check it with
+hindsight by quoting the evidence; don't give an opinion.
 
 Scene before the boundary was at: {old_location}
 Scene after the boundary is at: {new_location}
 
 {excerpt}
 
-Return JSON: keep (bool), confidence (0-1), reason (one sentence)."""
+Return JSON:
+- place_before: the site where the characters were just before the >>> exchange
+- movement_quote: the exact words from the GM's NARRATION in the >>> exchange that show the
+  characters arriving at a different site or a significant time passing. "none" if the GM's
+  reply doesn't actually take them anywhere (the player only announcing a move doesn't count;
+  dialogue doesn't count; moving within the same building or ship doesn't count)
+- place_after: the site where the characters are at the end of the >>> exchange
+- same_site: true if place_before and place_after are parts of the same building, ship,
+  station, settlement or site (a shop and the room behind its curtain; a highport concourse and
+  its docking bays)
+- return_quote: the exact words from a LATER GM narration showing the characters going back to
+  place_before. "none" if they didn't go back
+- reason: one sentence"""
 
 ARCHIVE_SYSTEM = """\
 You are the archivist for a solo role-playing campaign. You turn play transcripts into a

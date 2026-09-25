@@ -42,14 +42,18 @@ GATE_SCHEMA = {  # reason first so the model decides before it lists
     "additionalProperties": False,
 }
 
-AUDIT_SCHEMA = {
+AUDIT_SCHEMA = {  # evidence first; the code decides from it (a bare keep/undo flag confused 9B)
     "type": "object",
     "properties": {
-        "keep": {"type": "boolean"},
-        "confidence": {"type": "number"},
+        "place_before": {"type": "string"},
+        "movement_quote": {"type": "string"},
+        "place_after": {"type": "string"},
+        "same_site": {"type": "boolean"},
+        "return_quote": {"type": "string"},
         "reason": {"type": "string"},
     },
-    "required": ["keep", "confidence", "reason"],
+    "required": ["place_before", "movement_quote", "place_after", "same_site", "return_quote",
+                 "reason"],
     "additionalProperties": False,
 }
 
@@ -90,8 +94,11 @@ async def _verdict(campaign: Campaign, router: LLMClient, state: State, messages
     reply = upto[-1]["content"] if upto and upto[-1]["role"] == "assistant" else ""
     overrule = None
     if verdict.get("transition"):
-        if quote_is_dialogue(verdict.get("movement_quote", ""), reply):
+        quote = verdict.get("movement_quote", "")
+        if quote_is_dialogue(quote, reply):
             overrule = "evidence was dialogue"
+        elif not in_narration(quote, reply):
+            overrule = "evidence not in the GM's narration"
         elif same_place(current.location, verdict.get("new_location") or verdict.get("location_now")):
             overrule = "same place"
     if overrule:
@@ -127,6 +134,24 @@ _DIALOGUE = re.compile(r'"[^"]*"|“[^”]*”')
 
 def _norm(text: str) -> str:
     return re.sub(r"[\s*_\"“”]+", " ", text).strip().lower()
+
+
+def in_narration(quote: str, reply: str) -> bool:
+    """The quote appears in the reply's narration (outside quoted speech), allowing light
+    paraphrase: at least 60% of its consecutive word pairs occur there in the same order.
+    Rejects evidence lifted from the player's message, from another reply, or invented."""
+    def words(text: str) -> list[str]:
+        return re.findall(r"[a-z0-9']+", _norm(text))
+
+    q = words(quote)
+    if not q or _norm(quote) == "none":
+        return False
+    narration = words(_DIALOGUE.sub(" ", reply))
+    if len(q) == 1:
+        return q[0] in narration
+    pairs = set(zip(narration, narration[1:]))
+    qp = list(zip(q, q[1:]))
+    return sum(p in pairs for p in qp) >= 0.6 * len(qp)
 
 
 def quote_is_dialogue(quote: str, reply: str) -> bool:
@@ -281,6 +306,22 @@ async def gatekeep(campaign: Campaign, router: LLMClient | None, message: str,
 
 # ---- audit ------------------------------------------------------------------
 
+def judge_boundary(verdict: dict, after: list[dict]) -> tuple[bool, str]:
+    """Keep a scene boundary only if the GM's reply at it narrates a real move (quoted, outside
+    dialogue, to a different place) and the characters didn't go straight back afterwards."""
+    at = after[1]["content"] if len(after) > 1 and after[1]["role"] == "assistant" else ""
+    later = "\n".join(m["content"] for m in after[2:] if m["role"] == "assistant")
+    move = verdict.get("movement_quote", "")
+    if quote_is_dialogue(move, at) or not in_narration(move, at):
+        return False, "no move narrated at the boundary"
+    if verdict.get("same_site") or same_place(verdict.get("place_before"), verdict.get("place_after")):
+        return False, "same place"
+    back = verdict.get("return_quote", "")
+    if in_narration(back, later):
+        return False, "went straight back"
+    return True, "move narrated and stuck"
+
+
 async def audit(campaign: Campaign, router: LLMClient) -> list[dict]:
     """Before compaction: re-check each unaudited provisional boundary with hindsight and merge
     scenes back together where the router now thinks the split was wrong."""
@@ -304,9 +345,10 @@ async def audit(campaign: Campaign, router: LLMClient) -> list[dict]:
              {"role": "user", "content": prompts.AUDIT_TASK.format(
                  old_location=prev.location or "unknown",
                  new_location=scene.location or "unknown", excerpt=excerpt)}],
-            AUDIT_SCHEMA, max_tokens=300)
-        results.append({"scene": scene.id, **verdict})
-        if not verdict.get("keep", True) and verdict.get("confidence", 0) >= 0.6:
+            AUDIT_SCHEMA, max_tokens=500)
+        keep, why = judge_boundary(verdict, after)
+        results.append({"scene": scene.id, "keep": keep, "why": why, **verdict})
+        if not keep:
             del state.scenes[i]  # merge into prev; prev keeps its status and title
             if i == len(state.scenes):
                 prev.status = "open"

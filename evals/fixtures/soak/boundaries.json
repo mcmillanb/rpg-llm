@@ -1,0 +1,22 @@
+[
+ {
+  "location": "the room behind the wall",
+  "user_id": 64,
+  "expect": "undo"
+ },
+ {
+  "location": "the orbital highport",
+  "user_id": 74,
+  "expect": "undo"
+ },
+ {
+  "location": "the Lantern",
+  "user_id": 90,
+  "expect": "undo"
+ },
+ {
+  "location": "the startown market",
+  "user_id": 98,
+  "expect": "keep"
+ }
+]
