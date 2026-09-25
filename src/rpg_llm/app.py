@@ -22,6 +22,11 @@ STATIC = Path(__file__).parent / "static"
 MAX_TOOL_ROUNDS = 5
 QUIET_SECONDS = 180  # background filing waits until the player has been quiet this long
 QUIET_POLL = 5
+# Condensing the live tail rewrites the start of the prompt, so the next turn re-reads it once.
+# Do it in the background after a reply once the tail passes FOLD_EARLY of the budget, and cut
+# it down to FOLD_KEEP of the budget so it happens rarely.
+FOLD_EARLY = 0.8
+FOLD_KEEP = 0.35
 
 
 class Runtime:
@@ -64,6 +69,7 @@ class Runtime:
 
     def st(self, slug: str) -> dict:
         return self.status.setdefault(slug, {"tracking": False, "compacting": False,
+                                             "condensing": False,
                                              "last_sheet": None,
                                              "last_verdict": None, "last_compaction": None,
                                              "last_context": None, "error": None})
@@ -82,23 +88,45 @@ class Runtime:
     # ---- background jobs ----------------------------------------------------
 
     async def run_track(self, c: Campaign) -> None:
+        """After each reply, in the background: scene tracking, the character sheet, and
+        condensing a long live tail. Each step runs even if an earlier one fails."""
         st = self.st(c.slug)
         st["tracking"] = True
         try:
-            async with self.lock(c.slug):
-                v = await router.track(c, self.router, self.settings.tuning.router_threshold)
-            if v is not None:
-                st["last_verdict"] = {**v, "at": time.time()}
-            async with self.lock(c.slug):
-                changed = await sheet.update(c, self.router,
-                                             router.router_system(c, c.load_state()))
-            if changed:
-                st["last_sheet"] = {**changed, "at": time.time()}
-        except Exception as e:
-            log.exception("scene tracking failed")
-            st["error"] = f"scene tracking: {e}"
+            try:
+                async with self.lock(c.slug):
+                    v = await router.track(c, self.router, self.settings.tuning.router_threshold)
+                if v is not None:
+                    st["last_verdict"] = {**v, "at": time.time()}
+            except Exception as e:
+                log.exception("scene tracking failed")
+                st["error"] = f"scene tracking: {e}"
+            try:
+                async with self.lock(c.slug):
+                    changed = await sheet.update(c, self.router,
+                                                 router.router_system(c, c.load_state()))
+                if changed:
+                    st["last_sheet"] = {**changed, "at": time.time()}
+            except Exception as e:
+                log.exception("sheet update failed")
+                st["error"] = f"character sheet: {e}"
+            try:
+                budget = await self.tail_budget()
+                if context.tail_tokens(c, c.load_state(), c.messages()) > FOLD_EARLY * budget:
+                    st["condensing"] = True
+                    await compactor.fold_current_scene(c, self.archiver,
+                                                       int(budget * FOLD_KEEP), self.lock(c.slug))
+            except Exception as e:
+                log.exception("condensing failed")
+                st["error"] = f"condensing: {e}"
+            finally:
+                st["condensing"] = False
         finally:
             st["tracking"] = False
+
+    async def tail_budget(self) -> int:
+        window = await self.dm.context_window() or 32768
+        return int(window * self.settings.tuning.live_tail_pct / 100)
 
     def touch(self, slug: str) -> None:
         self.seen[slug] = time.time()
@@ -192,11 +220,11 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     yield sse({"type": "context", **info})
 
     state = c.load_state()
-    window = await rt.dm.context_window() or 32768
-    budget = int(window * rt.settings.tuning.live_tail_pct / 100)
-    if context.tail_tokens(c, state, messages) > budget:
+    budget = await rt.tail_budget()
+    if context.tail_tokens(c, state, messages) > budget:  # fallback: normally done after a reply
         yield sse({"type": "status", "text": "condensing the start of this scene…"})
-        await compactor.fold_current_scene(c, rt.archiver, budget // 2, rt.lock(c.slug))
+        await compactor.fold_current_scene(c, rt.archiver, int(budget * FOLD_KEEP),
+                                           rt.lock(c.slug))
         state = c.load_state()
 
     convo = context.build(c, state, messages, notes)
