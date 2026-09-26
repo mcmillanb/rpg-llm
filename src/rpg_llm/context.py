@@ -12,7 +12,7 @@ from rpg_llm.vault import Campaign, State, estimate_tokens
 
 CONSEQUENCES = ("brutal", "normal", "low")
 DICE_MODES = ("auto", "manual", "none")
-STYLES = ("plain", "atmospheric")
+STYLES = ("plain", "atmospheric", "lighthearted", "comedic")
 LENGTHS = ("short", "medium", "long")
 
 
@@ -35,8 +35,8 @@ def system_prompt(campaign: Campaign, state: State) -> str:
     tone = (meta.get("tone") or suggest.tone_for(campaign.root.parent.parent, system)).strip()
     system_line = f"\nGame system / setting: {system}\n" if system else ""
     if tone:
-        system_line += (f"Tone and feel: {tone} (unless the player's additional instructions below "
-                        "say otherwise)\n")
+        system_line += (f"Tone and feel: {tone} (the style in the table rules and the player's "
+                        "additional instructions take priority)\n")
     text = prompts.DM_SYSTEM.format(
         system_line=system_line,
         extra=f"\nAdditional instructions from the player:\n{extra}\n" if extra else "",

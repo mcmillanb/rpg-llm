@@ -370,6 +370,7 @@ class ChoosePortrait(BaseModel):
 class PremiseAsk(BaseModel):
     system: str = ""
     tone: str = ""
+    style: str = ""
     seed: str = ""
     avoid: list[str] = []
 
@@ -561,7 +562,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         rt = R()
         rt.require_configured()
         tone = body.tone.strip() or suggest.tone_for(rt.vault.root, body.system)
-        return {"premise": await suggest.premise(rt.dm, body.system, body.seed, body.avoid, tone)}
+        return {"premise": await suggest.premise(rt.dm, body.system, body.seed, body.avoid, tone,
+                                                 body.style)}
 
     @app.get("/api/campaigns/{slug}")
     async def get_campaign(slug: str):

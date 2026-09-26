@@ -43,6 +43,22 @@ unless the fiction has already established it.""",
     "atmospheric": """\
 Style: vivid, atmospheric prose with sensory detail and mood, while staying clear about what the
 character can see and do.""",
+    "lighthearted": """\
+Style: warm, lighthearted storytelling with real stakes. Keep the drama and danger real, but let
+humour come through naturally: characterful NPCs with distinct voices and quirks, playful banter,
+small funny details and the occasional comic beat, especially in quiet moments. Never undercut a
+serious or tragic moment with a joke, and don't turn the world into parody.""",
+    "comedic": """\
+Style: comedy first. Play it for laughs: absurd situations that follow their own silly logic,
+NPCs with ridiculous quirks and strong opinions, running gags, comic timing and the occasional
+fourth-wall-adjacent aside. The world should still be consistent and the player's choices should
+still matter, but failure is funny rather than grim. Keep it good-natured, never mean-spirited.""",
+}
+
+PREMISE_MOODS = {
+    "lighthearted": "Make it warm and lighthearted: a real adventure with humour and charm.",
+    "comedic": "Make it funny: a comedic premise with an absurd hook, while still being a playable "
+               "adventure.",
 }
 
 LENGTHS = {
@@ -277,7 +293,7 @@ PREMISE_TASK = """\
 Write the opening premise for a solo tabletop RPG campaign.
 
 Game system / setting: {system}
-{tone}{seed}{avoid}
+{tone}{mood}{seed}{avoid}
 Cover, in 120-180 words of plain prose (no headings, no lists):
 - the player character: the kind of protagonist this game is built around (a D&D adventurer
   with a class such as fighter, wizard, rogue or cleric; a Call of Cthulhu investigator; a

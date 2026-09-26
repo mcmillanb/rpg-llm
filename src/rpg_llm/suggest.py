@@ -47,7 +47,7 @@ async def systems(dm: LLMClient, vault_root: Path, refresh: bool = False) -> dic
 
 
 async def premise(dm: LLMClient, system: str, seed: str = "", avoid: list[str] | None = None,
-                  tone: str = "") -> str:
+                  tone: str = "", style: str = "") -> str:
     """A starting premise. `seed` is the player's own idea to build on; `avoid` holds earlier
     suggestions so "try another" gives something different."""
     seed_text = f"\nThe player's idea, to build on and keep: {seed.strip()}\n" if seed.strip() else ""
@@ -60,7 +60,9 @@ async def premise(dm: LLMClient, system: str, seed: str = "", avoid: list[str] |
     msg = await dm.chat(
         [{"role": "user", "content": prompts.PREMISE_TASK.format(
             system=system.strip() or "any setting you know well",
-            tone=f"Tone and feel: {tone.strip()}\n" if tone.strip() else "", seed=seed_text,
+            tone=f"Tone and feel: {tone.strip()}\n" if tone.strip() else "",
+            mood=prompts.PREMISE_MOODS.get(style, "") + ("\n" if style in prompts.PREMISE_MOODS else ""),
+            seed=seed_text,
             avoid=avoid_text)}],
         max_tokens=600, temperature=1.0, extra_body=NO_THINKING)
     text = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip()

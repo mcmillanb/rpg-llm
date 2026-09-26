@@ -370,6 +370,17 @@ function openNewCampaign() {
     <div id="nSystemBlurb" class="muted small"></div>
     <input id="nSystem" class="hidden" placeholder="Any game or setting, e.g. Mothership, or your own world">
     <div class="muted small"><a id="nRefresh">↻ ask the GM again</a></div>
+    <div class="two">
+      <div><label>Writing style</label><select id="nStyle">
+        <option value="plain" selected>Plain: practical, matter-of-fact</option>
+        <option value="atmospheric">Atmospheric: vivid, moody</option>
+        <option value="lighthearted">Lighthearted: real stakes, lots of humour</option>
+        <option value="comedic">Comedic: played for laughs</option></select></div>
+      <div><label>Reply length</label><select id="nLength">
+        <option value="short">Short (~100–150 words)</option>
+        <option value="medium" selected>Medium (~150–250 words)</option>
+        <option value="long">Long (~250–400 words)</option></select></div>
+    </div>
     <label>Premise <span class="muted">(optional): your character, where the story starts, or an idea to build on</span></label>
     <textarea id="nPremise" rows="7" placeholder="Leave blank to let the GM invent the opening, type your own idea, or use Suggest."></textarea>
     <div class="row-actions">
@@ -405,15 +416,6 @@ function openNewCampaign() {
         <option value="auto" selected>Rolled for me, shown in the story</option>
         <option value="manual">I roll my own dice</option>
         <option value="none">No dice: pure narrative</option></select></div>
-    </div>
-    <div class="two">
-      <div><label>Writing style</label><select id="nStyle">
-        <option value="plain" selected>Plain: practical, matter-of-fact</option>
-        <option value="atmospheric">Atmospheric: vivid, moody</option></select></div>
-      <div><label>Reply length</label><select id="nLength">
-        <option value="short">Short (~100–150 words)</option>
-        <option value="medium" selected>Medium (~150–250 words)</option>
-        <option value="long">Long (~250–400 words)</option></select></div>
     </div>
     <label>Look</label><select id="nLook"><option value="auto">Match the game system</option></select>
     <label class="check"><input type="checkbox" id="nRewind"> Allow rewinds: let me edit my last move or re-roll the GM's reply after seeing it</label>
@@ -500,7 +502,7 @@ async function suggestPremise(fresh) {
   $("nPremiseMsg").textContent = "The GM is thinking up a premise…";
   try {
     const r = await api("/api/suggest/premise", { method: "POST", body: JSON.stringify({
-      system: chosenSystem(), seed: NEW.seed, avoid: NEW.history,
+      system: chosenSystem(), seed: NEW.seed, avoid: NEW.history, style: $("nStyle").value,
       tone: SYSTEMS.find(x => x.name === chosenSystem())?.blurb || "" }) });
     NEW.history.push(r.premise);
     showSuggestion(NEW.history.length - 1);
