@@ -318,6 +318,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
         entry["tools"] = trace
     if rolls:
         entry["rolls"] = rolls
+    if not requested and mode == "virtual" and content.strip():
+        requested = dice.request_from_text(content, f"{user['id']}")
     if requested:
         entry["roll_request"] = requested
     if supersedes:
@@ -402,6 +404,19 @@ def can_rewind(c: Campaign) -> bool:
     """Rewinding = changing or re-rolling a turn after seeing the GM's reply. Off by default so
     outcomes stick; a campaign can allow it."""
     return bool(c.meta.get("allow_rewind"))
+
+
+def pending_roll(c: Campaign, msgs: list[dict]) -> dict | None:
+    """The roll the last GM reply is waiting for, if any, including one the GM only wrote as
+    text in an on-screen-dice campaign."""
+    if not msgs or msgs[-1]["role"] != "assistant":
+        return None
+    last = msgs[-1]
+    if last.get("roll_request"):
+        return last["roll_request"]
+    if context.table(c.meta)["dice"] == "virtual":
+        return dice.request_from_text(last.get("content", ""), str(last["id"]))
+    return None
 
 
 def replied(msgs: list[dict]) -> bool:
@@ -594,6 +609,10 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         c = rt.campaign(slug)
         rt.touch(slug)
         state = c.load_state()
+        msgs = c.messages()
+        req = pending_roll(c, msgs)
+        if req and not msgs[-1].get("roll_request"):
+            msgs[-1] = {**msgs[-1], "roll_request": req}
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
                 "table": context.table(c.meta),
                 "portrait": portrait.current(c),
@@ -601,7 +620,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
                 "images": rt.settings.app.images.enabled,
                 "theme": c.meta.get("theme") or themes.default_for(c.meta.get("system") or ""),
                 "themes": themes.public(),
-                "messages": c.messages(),
+                "messages": msgs,
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
                 "status": rt.st(c.slug)}
 
@@ -698,7 +717,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         rt.require_configured()
         c = rt.campaign(slug)
         msgs = c.messages()
-        req = msgs[-1].get("roll_request") if msgs and msgs[-1]["role"] == "assistant" else None
+        req = pending_roll(c, msgs)
         if not req or req["id"] != body.id:
             raise HTTPException(409, "That roll isn't waiting any more.")
         r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"))

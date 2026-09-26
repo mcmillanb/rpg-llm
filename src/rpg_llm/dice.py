@@ -1,5 +1,6 @@
 """Real dice for the GM: the model asks, the app rolls."""
 
+import hashlib
 import re
 import secrets
 
@@ -108,3 +109,34 @@ def roll_under_system(system: str) -> bool:
     """Systems that roll under a skill; everywhere else 'at most' is a model slip."""
     s = (system or "").lower()
     return any(k in s for k in ROLL_UNDER)
+
+
+_TEXT_REQUEST = re.compile(
+    r"\broll\s+(?:a\s+|an\s+)?(\d*\s*d\s*(?:\d+|%)(?:\s*[+-]\s*\d+)?)"  # dice
+    r"\s*(?:\(([^)]*)\))?"                                                  # (Target 8+)
+    r"(?:\s*(?:to|for)\s+([^.\n]{3,200}))?", re.I)
+
+
+def request_from_text(text: str, key: str) -> dict | None:
+    """Fallback for a GM that writes 'Roll 2D6+1 (Target 8+) to break the concrete' instead of
+    calling request_roll: build the same request from its words. `key` makes the id stable."""
+    matches = list(_TEXT_REQUEST.finditer(text or ""))
+    if not matches:
+        return None
+    m = matches[-1]
+    try:
+        count, sides, mod = parse(re.sub(r"\s+", "", m.group(1)))
+    except ValueError:
+        return None
+    req = {"id": "t" + hashlib.sha1(f"{key}:{m.group(0)}".encode()).hexdigest()[:11],
+           "dice": notation(count, sides, mod), "from_text": True}
+    goal = (m.group(3) or "").strip().rstrip(",;:")
+    if len(goal) > 70:  # keep it short, cut at a word
+        goal = goal[:70].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    req["prompt"] = f"Roll to {goal}" if goal else f"Roll {req['dice']}"
+    target = re.search(r"(\d+)", m.group(2) or "")
+    if target:
+        req["target"] = int(target.group(1))
+        req["success_if"] = "at_most" if re.search(r"or less|or under|at most|below", m.group(2) or "", re.I) \
+            else "at_least"
+    return req

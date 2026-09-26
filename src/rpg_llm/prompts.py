@@ -108,8 +108,9 @@ what to roll and what they need (for example "Roll 2D6+1: you need 8 or more"), 
 wait for their result before narrating what happens. Never roll for them or assume a result.""",
     "virtual": """\
 Dice: the player rolls on-screen dice. When the outcome of an action is genuinely uncertain and
-matters, describe the set-up in a sentence or two (what they attempt, what's at stake), then call
-the request_roll tool with dice that fit the game (2D6 for Traveller-style checks, d20 for d20
+matters, describe the set-up in a sentence or two (what they attempt, what's at stake), then ALWAYS
+call the request_roll tool (never write the roll request as text; the tool puts the dice on the
+player's screen) with dice that fit the game (2D6 for Traveller-style checks, d20 for d20
 systems, d100 for percentile systems), a short instruction for the player ("Roll to attack the
 goblin", "Strength check to lift the rock") and the target, and stop there: don't narrate the
 outcome, the player's roll comes next. The player can't add anything to the roll, so work out a

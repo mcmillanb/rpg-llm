@@ -843,3 +843,31 @@ async def test_changing_style_condenses_the_old_voice(tmp_path):
         before = c.load_state().fold
         client.patch(f"/api/admin/campaigns/{slug}", json=body)
         assert c.load_state().fold == before
+
+
+def test_a_roll_written_as_text_still_gets_dice():
+    from rpg_llm import dice
+    r = dice.request_from_text("You line up the strike.\n\nRoll 2D6+1 (Target 8+) to break the "
+                               "concrete safely without damaging the hatch.", "164")
+    assert r["dice"] == "2D6+1" and r["target"] == 8 and r["success_if"] == "at_least"
+    assert r["prompt"].startswith("Roll to break the concrete safely")
+    assert r == dice.request_from_text("You line up the strike.\n\nRoll 2D6+1 (Target 8+) to break "
+                                       "the concrete safely without damaging the hatch.", "164")
+    assert dice.request_from_text("You roll up your sleeves.", "1") is None
+
+
+def test_old_text_roll_request_is_playable(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[[{"content": "The concrete cracks cleanly."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "dice": "virtual"}).json()["slug"]
+        c = rt.vault.get(slug)
+        c.append({"role": "user", "content": "I break the concrete"})
+        c.append({"role": "assistant", "content": "Roll 2D6+1 (Target 8+) to break the concrete."})
+        last = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]
+        req = last["roll_request"]
+        assert req["dice"] == "2D6+1"
+        events = sse_events(client.post(f"/api/campaigns/{slug}/roll", json={"id": req["id"]}))
+        assert events[0]["type"] == "rolled"
+        assert client.get(f"/api/campaigns/{slug}").json()["messages"][-1]["content"] == "The concrete cracks cleanly."
