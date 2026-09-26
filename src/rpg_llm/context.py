@@ -40,7 +40,8 @@ def system_prompt(campaign: Campaign, state: State) -> str:
     text = prompts.DM_SYSTEM.format(
         system_line=system_line,
         extra=f"\nAdditional instructions from the player:\n{extra}\n" if extra else "",
-        table_rules="\n\n".join([prompts.STYLES[t["style"]] + " " + prompts.LENGTHS[t["length"]],
+        table_rules="\n\n".join([prompts.STYLES[t["style"]] + " " + prompts.RHYTHM + " "
+                                  + prompts.LENGTHS[t["length"]],
                                   prompts.CONSEQUENCES[t["consequences"]], prompts.DICE[t["dice"]]]),
         brief=campaign.brief.strip() or "(nothing yet)",
         arc=(f"\n# Story arc (GM only: guidance, not a script; never reveal it)\n\n{arc}\n"
@@ -73,3 +74,9 @@ def build(campaign: Campaign, state: State, messages: list[dict],
 def tail_tokens(campaign: Campaign, state: State, messages: list[dict]) -> int:
     return estimate_tokens(system_prompt(campaign, state)) + sum(
         estimate_tokens(m["content"]) for m in live_tail(state, messages))
+
+
+def style_reminder(meta: dict) -> str:
+    t = table(meta)
+    return prompts.STYLE_REMINDER.format(style=prompts.STYLE_NAMES[t["style"]],
+                                         limit=prompts.LIMITS[t["length"]])

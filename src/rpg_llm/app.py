@@ -215,7 +215,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     notes, info = await router.gatekeep(c, gate_router, user["content"], last_reply,
                                         rt.settings.tuning.gatekeeper_timeout)
     info["seconds"] = round(time.time() - t0, 1)
-    notes = "\n\n".join(p for p in (sheet.notes_block(sheet.load(c)), notes) if p) or None
+    notes = "\n\n".join(p for p in (context.style_reminder(c.meta), sheet.notes_block(sheet.load(c)),
+                                     notes) if p) or None
     info["notes"] = notes
     st["last_context"] = info
     yield sse({"type": "context", **info})

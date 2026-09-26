@@ -332,7 +332,8 @@ def test_edit_last_message_replaces_exchange(tmp_path):
         client.post(f"/api/campaigns/{slug}/edit", json={"content": "right"})
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
         assert [m["content"] for m in msgs] == ["right", "You go right."]
-        assert [m["content"] for m in dm.calls[1][1][1:]] == ["right"]
+        sent = [m["content"] for m in dm.calls[1][1][1:]]
+        assert len(sent) == 1 and sent[0].endswith("\n\nright")  # after the per-turn GM notes
 
 
 def test_bracketed_and_the_prefixed_names_match_existing_entry():
@@ -511,7 +512,7 @@ def test_table_settings_reach_the_prompt_and_old_campaigns_get_no_dice(vault):
                  "length": "short"})
     sp = context.system_prompt(c, c.load_state())
     assert "BRUTAL" in sp and "roll_dice" in sp
-    assert "atmospheric" in sp and "100-150 words" in sp and "matter-of-fact" not in sp
+    assert "atmospheric" in sp and "under 150 words" in sp and "matter-of-fact" not in sp
 
 
 def test_auto_dice_turn_rolls_real_dice_and_records_them(tmp_path):
@@ -773,7 +774,7 @@ def test_virtual_dice_request_roll_then_narrate(tmp_path):
         events = sse_events(client.post(f"/api/campaigns/{slug}/roll", json={"id": req["id"]}))
         rolled = events[0]
         assert rolled["type"] == "rolled" and 4 <= rolled["roll"]["total"] <= 23
-        assert dm.calls[1][1][-1]["content"].startswith("🎲 Roll to attack the goblin: 1D20+3")
+        assert "\n\n🎲 Roll to attack the goblin: 1D20+3" in dm.calls[1][1][-1]["content"]
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
         assert msgs[-2]["roll"]["total"] == rolled["roll"]["total"]
         assert msgs[-1]["content"] == "Your blade finds its mark."
@@ -806,3 +807,39 @@ def test_sheet_change_notes_drop_leaked_reasoning():
     assert sheet.tidy_changes(notes) == ["Paid 20 Cr for fuel", "Added burn on right hand"]
     g = sheet.guard(None, {**sheet.blank(), "assets": ["y" * 400]})
     assert len(g["assets"][0]) == sheet.MAX_ENTRY and g["assets"][0].endswith("…")
+
+
+# ---- style reminder & style changes ----------------------------------------
+
+def test_style_reminder_rides_every_turn(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[[{"content": "Fine."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "style": "comedic", "length": "short"}).json()["slug"]
+        client.post(f"/api/campaigns/{slug}/chat", json={"content": "hi"})
+        last = dm.calls[0][1][-1]["content"]
+        assert "Style for this reply: comedic" in last and "Under 150 words" in last
+        assert "no runs of very short fragment" in dm.calls[0][1][0]["content"]
+
+
+async def test_changing_style_condenses_the_old_voice(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()), dm=FakeLLM(), router_llm=FakeLLM(),
+                 archiver=FakeLLM(chat_reply="What happened so far."))
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        c = rt.vault.get(slug)
+        play(c, *[(f"u{i} " + "x" * 900, f"g{i} " + "y" * 900) for i in range(6)])
+        body = {"name": "T", "style": "lighthearted", "length": "medium"}
+        assert client.patch(f"/api/admin/campaigns/{slug}", json=body).status_code == 200
+        for _ in range(50):
+            if c.load_state().fold:
+                break
+            await asyncio.sleep(0.05)
+        fold = c.load_state().fold
+        assert fold and fold["summary"] == "What happened so far."
+        assert len(context.live_tail(c.load_state(), c.messages())) <= 4
+        # saving again without a style change doesn't condense again
+        before = c.load_state().fold
+        client.patch(f"/api/admin/campaigns/{slug}", json=body)
+        assert c.load_state().fold == before

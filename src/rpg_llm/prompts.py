@@ -65,11 +65,25 @@ PREMISE_MOODS = {
 }
 
 LENGTHS = {
-    "short": "Keep each reply to about 100-150 words (less for simple actions).",
-    "medium": "Keep each reply to about 150-250 words (less for simple actions).",
-    "long": "Replies can run to about 250-400 words when the moment deserves it; less for simple "
-            "actions.",
+    "short": "Keep each reply under 150 words, usually about 100 (less for simple actions).",
+    "medium": "Keep each reply under 250 words, usually 150-200 (less for simple actions).",
+    "long": "Replies can run to 400 words when the moment deserves it; less for simple actions.",
 }
+LIMITS = {"short": 150, "medium": 250, "long": 400}
+
+RHYTHM = ("Write in normal, varied sentences that flow: no runs of very short fragment sentences "
+          "(\"You stand. You walk. You kneel.\"), no long chains of clauses joined by \"and... "
+          "and... and\", and no repeating a phrase for rhythm. Never go over the word limit: if a "
+          "lot is happening, summarise and move on.")
+
+# Repeated at the end of every turn's prompt: instructions there outweigh the voice of the
+# earlier replies, which the model otherwise imitates.
+STYLE_REMINDER = ("Style for this reply: {style}, in normal full sentences that flow; no runs of "
+                  "short fragments or \"and... and... and\" chains, even if earlier replies had "
+                  "them. Under {limit} words.")
+STYLE_NAMES = {"plain": "plain and matter-of-fact", "atmospheric": "vivid and atmospheric",
+               "lighthearted": "warm and lighthearted, with natural humour",
+               "comedic": "comedic, the humour coming from situations and characters"}
 
 CONSEQUENCES = {
     "brutal": """Consequences are BRUTAL. The world does not protect the player character. Bad plans, bad luck

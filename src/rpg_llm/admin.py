@@ -296,12 +296,20 @@ def register(app: FastAPI, R) -> None:
 
     @app.patch("/api/admin/campaigns/{slug}", dependencies=auth)
     async def edit_campaign(slug: str, body: CampaignEdit):
-        c = R().campaign(slug)
+        rt = R()
+        c = rt.campaign(slug)
+        before = context.table(c.meta)
         meta = {**c.meta, **body.model_dump()}
         meta.update(context.table(meta))  # normalise unknown values
         if meta.get("theme") not in (*themes.THEMES, themes.PLAIN):
             meta["theme"] = themes.PLAIN
         c.save_meta(meta)
+        after = context.table(meta)
+        if rt.configured and (before["style"], before["length"]) != (after["style"], after["length"]):
+            # A new voice doesn't take while dozens of replies in the old one sit in the live
+            # context (the model imitates them): condense all but the last couple of exchanges.
+            rt.spawn(rt.run_quietly(compactor.fold_current_scene(c, rt.archiver, 1200, rt.lock(slug)),
+                                    "condensing for a style change"))
         if not any(s.status == "compacted" for s in c.load_state().scenes):
             # nothing filed yet, so the brief is still just the premise: keep it in step
             c.write("brief.md", f"# {body.name}\n\n## Premise\n\n{body.premise.strip() or '(not set)'}\n")
