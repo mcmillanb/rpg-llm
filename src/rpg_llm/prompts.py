@@ -259,7 +259,7 @@ PREMISE_TASK = """\
 Write the opening premise for a solo tabletop RPG campaign.
 
 Game system / setting: {system}
-{seed}{avoid}
+{tone}{seed}{avoid}
 Cover, in 120-180 words of plain prose (no headings, no lists):
 - the player character: a name, who they are, one thing they are good at, one thing weighing on
   them

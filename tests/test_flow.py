@@ -724,3 +724,21 @@ async def test_narrated_time_skip_lets_a_scene_change_in_the_same_place(vault):
          "movement_quote": "none", "location_now": "the inn"}
     await router.track(c, FakeLLM([v]), threshold=0.7)
     assert len(c.load_state().scenes) == 2  # not overruled as "same place"
+
+
+# ---- tone -------------------------------------------------------------------
+
+def test_tone_comes_from_the_system_picker_and_can_be_overridden(vault):
+    import json as _json
+    cache = vault.root / ".cache"
+    cache.mkdir()
+    (cache / "systems-m.json").write_text(_json.dumps({"systems": [
+        {"name": "Traveller (Third Imperium)", "genre": "Sci-Fi",
+         "blurb": "A realistic, hard-edged space opera."}]}))
+    c = vault.create("Old game", system="Traveller (Third Imperium)")  # no tone stored
+    sp = context.system_prompt(c, c.load_state())
+    assert "Tone and feel: A realistic, hard-edged space opera." in sp
+    c.save_meta({**c.meta, "tone": "Whimsical and light."})
+    assert "Tone and feel: Whimsical and light." in context.system_prompt(c, c.load_state())
+    other = vault.create("Homebrew", system="My own world")
+    assert "Tone and feel" not in context.system_prompt(other, other.load_state())

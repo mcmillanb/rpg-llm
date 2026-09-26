@@ -43,7 +43,8 @@ async def systems(dm: LLMClient, vault_root: Path, refresh: bool = False) -> dic
     return out
 
 
-async def premise(dm: LLMClient, system: str, seed: str = "", avoid: list[str] | None = None) -> str:
+async def premise(dm: LLMClient, system: str, seed: str = "", avoid: list[str] | None = None,
+                  tone: str = "") -> str:
     """A starting premise. `seed` is the player's own idea to build on; `avoid` holds earlier
     suggestions so "try another" gives something different."""
     seed_text = f"\nThe player's idea, to build on and keep: {seed.strip()}\n" if seed.strip() else ""
@@ -52,7 +53,25 @@ async def premise(dm: LLMClient, system: str, seed: str = "", avoid: list[str] |
                   "place and hook):\n" + "\n".join(f"- {a[:300]}" for a in avoid) + "\n") if avoid else ""
     msg = await dm.chat(
         [{"role": "user", "content": prompts.PREMISE_TASK.format(
-            system=system.strip() or "any setting you know well", seed=seed_text, avoid=avoid_text)}],
+            system=system.strip() or "any setting you know well",
+            tone=f"Tone and feel: {tone.strip()}\n" if tone.strip() else "", seed=seed_text,
+            avoid=avoid_text)}],
         max_tokens=600, temperature=1.0, extra_body=NO_THINKING)
     text = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip()
     return re.sub(r"^(premise|opening premise)\s*:\s*", "", text, flags=re.I)
+
+
+def tone_for(vault_root: Path, system: str) -> str:
+    """The picker's one-line description of a game system, used as the GM's default tone.
+    Looks the system up in any cached list (whichever model wrote it)."""
+    name = (system or "").strip().lower()
+    if not name:
+        return ""
+    for f in sorted((vault_root / ".cache").glob("systems-*.json")) if (vault_root / ".cache").exists() else []:
+        try:
+            for s in json.loads(f.read_text()).get("systems", []):
+                if s.get("name", "").strip().lower() == name and s.get("blurb"):
+                    return s["blurb"].strip()
+        except (OSError, ValueError):
+            continue
+    return ""

@@ -345,6 +345,7 @@ class NewCampaign(BaseModel):
     genre: str = ""
     portrait: str = ""  # token of a portrait made during setup
     appearance: str = ""
+    tone: str = ""  # the system picker's description; the GM's default tone
 
 
 class PortraitAsk(BaseModel):
@@ -366,6 +367,7 @@ class ChoosePortrait(BaseModel):
 
 class PremiseAsk(BaseModel):
     system: str = ""
+    tone: str = ""
     seed: str = ""
     avoid: list[str] = []
 
@@ -442,7 +444,9 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         t = context.table({"consequences": body.consequences, "dice": body.dice})
         theme = body.theme if body.theme in themes.THEMES or body.theme == themes.PLAIN \
             else themes.default_for(body.system, body.genre)
+        tone = body.tone.strip() or suggest.tone_for(R().vault.root, body.system)
         c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t, "theme": theme,
+                     **({"tone": tone} if tone else {}),
                      **({"appearance": body.appearance.strip()} if body.appearance.strip() else {})})
         cand = portrait.candidate_path(R().vault.root, body.portrait)
         if cand:
@@ -553,7 +557,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def suggest_premise(body: PremiseAsk):
         rt = R()
         rt.require_configured()
-        return {"premise": await suggest.premise(rt.dm, body.system, body.seed, body.avoid)}
+        tone = body.tone.strip() or suggest.tone_for(rt.vault.root, body.system)
+        return {"premise": await suggest.premise(rt.dm, body.system, body.seed, body.avoid, tone)}
 
     @app.get("/api/campaigns/{slug}")
     async def get_campaign(slug: str):

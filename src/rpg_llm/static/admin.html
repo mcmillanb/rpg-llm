@@ -448,6 +448,7 @@ async function loadCampaigns() {
         <div class="row"><div><label>Name</label><input data-f="name" value="${esc(c.name)}"></div>
           <div><label>Game system / setting</label><input data-f="system" value="${esc(c.system)}"></div></div>
         <label>Premise</label><textarea data-f="premise" rows="4">${esc(c.premise)}</textarea>
+        <label>Tone and feel <span class="muted">(from the game system; the extra instructions below take priority)</span></label><input data-f="tone" value="${esc(c.tone)}">
         <label>Extra GM instructions</label><textarea data-f="dm_instructions" rows="3">${esc(c.dm_instructions)}</textarea>
         <div class="row"><div><label>Consequences</label><select data-f="consequences">
             ${[["low", "Low-stakes"], ["normal", "Normal"], ["brutal", "Brutal"]].map(([v, t]) => `<option value="${v}" ${c.consequences === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>

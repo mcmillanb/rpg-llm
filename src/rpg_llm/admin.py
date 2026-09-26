@@ -12,7 +12,7 @@ import httpx2
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from rpg_llm import arc, compactor, context, images, router, themes
+from rpg_llm import arc, compactor, context, images, router, suggest, themes
 from rpg_llm.config import ROLES, AppConfig, ImageGen, NotConfigured, Role, Server, Tuning
 from rpg_llm.importers import openwebui
 from rpg_llm.llm import LLMClient
@@ -51,6 +51,7 @@ class CampaignEdit(BaseModel):
     system: str = ""
     premise: str = ""
     dm_instructions: str = ""
+    tone: str = ""
     allow_rewind: bool = False
     consequences: str = "normal"
     dice: str = "none"
@@ -280,6 +281,7 @@ def register(app: FastAPI, R) -> None:
                 "slug": c.slug, **{k: c.meta.get(k, "") for k in
                                    ("name", "system", "premise", "dm_instructions")},
                 "allow_rewind": bool(c.meta.get("allow_rewind")), **context.table(c.meta),
+                "tone": c.meta.get("tone") or suggest.tone_for(rt.vault.root, c.meta.get("system") or ""),
                 "theme": c.meta.get("theme") or themes.default_for(c.meta.get("system") or ""),
                 "messages": len(c.messages()), "scenes": len(state.scenes),
                 "filed": sum(s.status == "compacted" for s in state.scenes),

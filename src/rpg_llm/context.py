@@ -6,7 +6,7 @@ the per-turn GM notes ride on the final user message, so the server only process
 
 import re
 
-from rpg_llm import prompts
+from rpg_llm import prompts, suggest
 from rpg_llm.vault import Campaign, State, estimate_tokens
 
 
@@ -29,8 +29,13 @@ def system_prompt(campaign: Campaign, state: State) -> str:
     extra = meta.get("dm_instructions") or ""
     t = table(meta)
     arc = re.sub(r"\n*<!--.*?-->\s*$", "", campaign.read("arc.md"), flags=re.S).strip()
+    tone = (meta.get("tone") or suggest.tone_for(campaign.root.parent.parent, system)).strip()
+    system_line = f"\nGame system / setting: {system}\n" if system else ""
+    if tone:
+        system_line += (f"Tone and feel: {tone} (unless the player's additional instructions below "
+                        "say otherwise)\n")
     text = prompts.DM_SYSTEM.format(
-        system_line=f"\nGame system / setting: {system}\n" if system else "",
+        system_line=system_line,
         extra=f"\nAdditional instructions from the player:\n{extra}\n" if extra else "",
         table_rules=prompts.CONSEQUENCES[t["consequences"]] + "\n\n" + prompts.DICE[t["dice"]],
         brief=campaign.brief.strip() or "(nothing yet)",

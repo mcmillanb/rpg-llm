@@ -441,6 +441,7 @@ function openNewCampaign() {
       allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value,
       theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
       portrait: PORT.at >= 0 ? PORT.history[PORT.at].token : "",
+      tone: SYSTEMS.find(x => x.name === chosenSystem())?.blurb || "",
       appearance: S.imagesEnabled ? $("nAppearance").value : "" }) });
     NEW = { seed: "", history: [], at: -1 };
     PORT = { history: [], at: -1 };
@@ -489,7 +490,8 @@ async function suggestPremise(fresh) {
   $("nPremiseMsg").textContent = "The GM is thinking up a premise…";
   try {
     const r = await api("/api/suggest/premise", { method: "POST", body: JSON.stringify({
-      system: chosenSystem(), seed: NEW.seed, avoid: NEW.history }) });
+      system: chosenSystem(), seed: NEW.seed, avoid: NEW.history,
+      tone: SYSTEMS.find(x => x.name === chosenSystem())?.blurb || "" }) });
     NEW.history.push(r.premise);
     showSuggestion(NEW.history.length - 1);
     $("nPremiseMsg").textContent = NEW.seed ? "Built on your idea. Edit it freely." : "Edit it freely, or try another.";
