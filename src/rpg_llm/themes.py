@@ -124,3 +124,19 @@ def prompt(theme: str, setting: str) -> str:
 def public() -> dict:
     """What the play page needs: labels and setting types per theme."""
     return {k: {"label": t["label"], "settings": list(t["settings"])} for k, t in THEMES.items()}
+
+
+# The light, all-genres wallpaper behind the campaign list and admin pages.
+HOME = {
+    "file": "home",
+    "seed": 202,
+    "prompt": ("A very light, airy, faded watercolour panorama that blends four worlds of tabletop "
+               "role-playing games into one continuous dreamlike landscape, flowing from left to "
+               "right: a ringed planet and a small starship in a pale starry sky, a fantasy castle on "
+               "a green hill with banners, a gothic manor and church spire under a soft moon, and a "
+               "distant neon city skyline. Soft pastel colours, high-key lighting, washed out and low "
+               "contrast, lots of pale cream and white space, gentle paper texture, like a faded "
+               "illustration in an old book. No text, no people."),
+    "negative": "text, letters, watermark, dark, high contrast, saturated, heavy shadows, people, "
+                "faces, frame",
+}

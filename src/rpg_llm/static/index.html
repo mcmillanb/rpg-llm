@@ -96,6 +96,12 @@ footer { border-top: 1px solid var(--line); background: var(--panel);
 pre.file { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
 .hidden { display: none !important; }
+/* the campaign list sits on a faint all-genres wallpaper; cards stay solid on top */
+body[data-page="list"] { background: linear-gradient(var(--wash), var(--wash)),
+  url("/static/backdrops/home.webp") center / cover fixed; }
+body[data-page="list"] header { background: var(--chrome-home); backdrop-filter: blur(6px); }
+body { --wash: rgba(246,244,239,.28); --chrome-home: rgba(255,255,255,.78); }
+body[data-mode="dark"] { --wash: rgba(21,23,26,.86); --chrome-home: rgba(29,32,36,.85); }
 
 /* ---- themed play page: painted backdrop per genre and setting ---------------------------- */
 .backdrop, .backdrop-shade { position: fixed; inset: 0; z-index: 0; pointer-events: none; display: none; }
@@ -320,6 +326,7 @@ async function showList() {
   $("title").textContent = "Campaigns";
   ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
   setLook(null);
+  document.body.dataset.page = "list";
   $("newBtn").classList.remove("hidden");
   const list = await api("/api/campaigns");
   const when = (t) => {
@@ -582,6 +589,7 @@ async function openCampaign(slug) {
   $("title").textContent = S.data.meta.name;
   ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.remove("hidden"));
   $("newBtn").classList.add("hidden");
+  delete document.body.dataset.page;
   setLook(S.data.theme);
   renderChat(true);
   updateStatus(S.data.status, S.data.scenes);

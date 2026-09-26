@@ -62,6 +62,10 @@ def call(server: str, path: str, body: dict | None = None):
 
 def render(server: str, prompt: str, seed: int, steps: int) -> bytes:
     pid = json.loads(call(server, "/prompt", {"prompt": workflow(prompt, themes.NEGATIVE, seed, steps)}))["prompt_id"]
+    return wait_image(server, pid)
+
+
+def wait_image(server: str, pid: str) -> bytes:
     while True:
         hist = json.loads(call(server, f"/history/{pid}"))
         if pid in hist:
@@ -85,6 +89,15 @@ def main() -> None:
     ap.add_argument("--quality", type=int, default=78)
     ap.add_argument("--out", type=Path, default=OUT, help="folder to write into (default: the app's)")
     a = ap.parse_args()
+    home = a.out / f"{themes.HOME['file']}.webp"
+    if (not a.only or "home" in a.only) and (a.force or not home.exists()):
+        t0 = time.time()
+        pid = json.loads(call(a.server, "/prompt", {"prompt": workflow(
+            themes.HOME["prompt"], themes.HOME["negative"], themes.HOME["seed"], a.steps)}))["prompt_id"]
+        png = wait_image(a.server, pid)
+        home.parent.mkdir(parents=True, exist_ok=True)
+        Image.open(io.BytesIO(png)).convert("RGB").save(home, "WEBP", quality=a.quality, method=6)
+        print(f"home: {time.time() - t0:.0f}s", flush=True)
     for theme, t in themes.THEMES.items():
         for setting in t["settings"]:
             key = f"{theme}/{setting}"

@@ -21,7 +21,12 @@
   --accent: #e0914d; --accent-ink: #1a1208; --ok: #7cc68a; --warn: #f07a7a; --soft: #2a241c;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--ink);
+html { background: var(--bg); }
+body { background: linear-gradient(var(--wash), var(--wash)), url("/static/backdrops/home.webp") center / cover fixed;
+  --wash: rgba(246,244,239,.5); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body { --wash: rgba(21,23,26,.9); } }
+:root[data-theme="dark"] body { --wash: rgba(21,23,26,.9); }
+html, body { margin: 0; color: var(--ink);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 1px solid var(--line); background: var(--panel);
