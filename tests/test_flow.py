@@ -318,6 +318,15 @@ async def test_refold_rewrites_the_summary_with_a_cast_list(vault):
     assert "Old summary." in archiver.calls[-1][1][-1]["content"]
 
 
+def test_clean_summary_drops_working_out():
+    text = ("Cast:\n- Kess (he): broker\n\nCallen paid Kess 25 credits.\n\n"
+            "He has 55 - 60 = -5? Wait, let's re-calculate.\n*   Start: 99\n\n"
+            "Open threads: dig out the ship.")
+    out = compactor.clean_summary(text)
+    assert "Wait" not in out and "Kess (he)" in out and "paid Kess 25" in out
+    assert out.endswith("dig out the ship.")
+
+
 def test_dialogue_is_not_movement_evidence():
     reply = ('Serevane stands. "Forty minutes. The *Kestrel.* Not the bay. The *hull.*" '
              'She walks out.')

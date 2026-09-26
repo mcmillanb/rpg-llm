@@ -316,7 +316,8 @@ gender exactly as the transcript uses them, and their role, e.g. "- Kess (he): f
 Harlow South". Then 2-4 paragraphs keeping every fact the game master will need: what was said,
 agreed and paid, where things are, injuries, items, open threads.
 
-Write it as a clean record: no questions, no notes to yourself, no working-out.
+Write it as a clean record: no questions, no notes to yourself, no working-out. Don't add up
+money; give only amounts the transcript states.
 {previous}
 Transcript:
 {transcript}"""

@@ -174,6 +174,26 @@ async def compact(campaign: Campaign, router_llm: LLMClient, archiver: LLMClient
     return report
 
 
+# Signs the model thought out loud (sums, second-guessing) instead of writing a record.
+WORKING_OUT = re.compile(r"\b(wait|let's|let me|re-?calculate|re-?read|correction|actually|"
+                         r"i will|i'll note|hmm|approximately|depending on)\b|\?\s*$|= *-?\d+\?|"
+                         r"\bremaining:", re.I | re.M)
+SUMS = re.compile(r"\d\s*[-+]\s*\d+\s*=")
+
+
+def clean_summary(text: str) -> str:
+    """Drop thinking tags and any paragraph or line where the model worked things out aloud."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    out = []
+    for para in re.split(r"\n\s*\n", text.strip()):
+        if SUMS.search(para):
+            continue
+        lines = [ln for ln in para.split("\n") if not WORKING_OUT.search(ln)]
+        if lines and (len(lines) == len(para.split("\n")) or len(lines) > 1):
+            out.append("\n".join(lines))
+    return "\n\n".join(out).strip()
+
+
 async def fold_current_scene(campaign: Campaign, archiver: LLMClient, keep_tokens: int,
                              lock: asyncio.Lock) -> None:
     """The current scene alone is over budget: summarise its older part into state.fold,
@@ -201,7 +221,7 @@ async def fold_current_scene(campaign: Campaign, archiver: LLMClient, keep_token
         max_tokens=1500, temperature=0.3, extra_body=NO_THINKING)
     async with lock:
         fresh = campaign.load_state()
-        fresh.fold = {"until": cut[-1]["id"], "summary": (msg.get("content") or "").strip()}
+        fresh.fold = {"until": cut[-1]["id"], "summary": clean_summary(msg.get("content") or "")}
         campaign.save_state(fresh)
 
 
@@ -240,7 +260,7 @@ async def refold(campaign: Campaign, archiver: LLMClient, lock: asyncio.Lock) ->
                       f"{state.fold['summary']}\n",
              transcript=wiki.format_transcript(covered, limit_chars=await transcript_limit(archiver)))}],
         max_tokens=2500, temperature=0.3, extra_body=NO_THINKING)
-    summary = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip()
+    summary = clean_summary(msg.get("content") or "")
     if len(summary) < 200:
         return None
     async with lock:
