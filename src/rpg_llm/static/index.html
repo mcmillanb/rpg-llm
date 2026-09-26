@@ -248,6 +248,57 @@ label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 .thumbs img.cur { opacity: 1; border-color: var(--accent); }
 .histnav button { padding: 4px 9px; }
 label.check input { width: auto; }
+
+/* ---- reminder rail: icons that open the side panels ------------------------------------ */
+#rail { display: flex; gap: 6px; z-index: 11; transition: opacity .45s ease, right .2s; }
+#rail button { position: relative; width: 42px; height: 42px; padding: 0; display: flex;
+  align-items: center; justify-content: center; border-radius: 12px; color: var(--muted);
+  background: var(--panel); }
+#rail button:hover { color: var(--ink); border-color: var(--accent); }
+#rail button.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+#rail svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
+#rail .dot { position: absolute; top: 5px; right: 5px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--panel); display: none; }
+#rail button.changed .dot { display: block; }
+#rail button.on .dot { display: none; }
+#rail .sep { flex: none; width: 1px; height: 1px; margin: 2px; }
+@media (min-width: 901px) {
+  #rail { position: fixed; right: 12px; top: 50%; transform: translateY(-50%); flex-direction: column; }
+  body[data-drawer] #rail { right: calc(min(460px, 100%) + 10px); }
+  #rail .sep { height: 8px; }
+}
+@media (max-width: 900px) {
+  .footrow #statusline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #rail { gap: 4px; }
+  #rail button { width: 36px; height: 36px; border-radius: 10px; }
+  #rail svg { width: 19px; height: 19px; }
+  #rail .sep { display: none; }
+}
+.footrow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.footrow #statusline { flex: 1; min-width: 0; margin-bottom: 0; }
+body[data-viewart] #rail { opacity: 0; pointer-events: none; }
+body[data-look] #rail button { box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+body[data-look] #drawer { backdrop-filter: blur(10px); }
+/* a pinned panel sits beside the chat on wide screens */
+@media (min-width: 1200px) {
+  body[data-pinned][data-drawer] #app { margin-right: min(460px, 100%); }
+  body[data-pinned][data-drawer] .wrap, body[data-pinned][data-drawer] .footwrap { width: 88%; }
+  body[data-pinned][data-drawer] #rail { right: calc(min(460px, 100%) + 10px); }
+}
+@media (max-width: 1199px) { #pinBtn { display: none; } }
+#drawer header { gap: 6px; }
+#pinBtn.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.pcard { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0;
+  background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.pcard .ptop { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.pcard .pname { font-weight: 600; font-size: 15px; }
+.pcard .pline { margin-top: 3px; }
+.pcard ul { margin: 6px 0 0; padding-left: 1.2em; }
+.pcard .edit { padding: 2px 8px; font-size: 12px; flex: none; }
+.pcard.here { border-color: var(--accent); }
+.drawer-md p { margin: 0 0 .6em; } .drawer-md ul { margin: 0 0 .6em; padding-left: 1.2em; }
+#drawer details summary { cursor: pointer; }
 </style>
 </head>
 <body>
@@ -259,13 +310,11 @@ label.check input { width: auto; }
     <button id="newBtn" class="primary hidden">+ New campaign</button>
     <button id="themeBtn" title="Light / dark">☾</button>
     <a href="/admin" title="Settings"><button>⚙</button></a>
-    <button id="sheetBtn" class="hidden">Sheet</button>
-    <button id="archiveBtn" class="hidden">Archive</button>
   </header>
   <main id="main"><div class="wrap" id="view"></div></main>
   <footer id="footer" class="hidden">
     <div class="footwrap">
-      <div id="statusline" class="ui muted"></div>
+      <div class="footrow"><div id="statusline" class="ui muted"></div><span id="railSlot"></span></div>
       <div class="composer">
         <textarea id="input" rows="1" placeholder="What do you do?  (Esc stops a reply and takes your message back · ↑ edits your last message)"></textarea>
         <button id="artBtn" class="hidden" title="View the artwork (click again, or Esc, to bring the messages back)" aria-label="View the artwork">👁</button>
@@ -274,9 +323,18 @@ label.check input { width: auto; }
     </div>
   </footer>
 </div>
+<nav id="rail" class="hidden" aria-label="Reminders">
+  <button data-panel="character" title="Character" aria-label="Character"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg><span class="dot"></span></button>
+  <button data-panel="gear" title="Gear and money" aria-label="Gear and money"><svg viewBox="0 0 24 24"><path d="M6 9a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v11H6z"/><path d="M9.5 6V4h5v2"/><path d="M9 13h6"/><path d="M9 16.5h6"/></svg><span class="dot"></span></button>
+  <button data-panel="people" title="People you've met" aria-label="People you've met"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.3c2.6.4 4.5 2.6 4.5 5.7"/></svg><span class="dot"></span></button>
+  <button data-panel="places" title="Places" aria-label="Places"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.6-6-10.5a6 6 0 0 1 12 0C18 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/></svg><span class="dot"></span></button>
+  <button data-panel="journal" title="Journal: threads, promises, the story so far" aria-label="Journal: threads, promises, the story so far"><svg viewBox="0 0 24 24"><path d="M5 5a2 2 0 0 1 2-2h12v15H7a2 2 0 0 0-2 2z"/><path d="M5 20a2 2 0 0 0 2 1h12v-3"/><path d="M9 7.5h6"/><path d="M9 11h4"/></svg><span class="dot"></span></button>
+  <span class="sep"></span>
+  <button data-panel="archive" title="Archive: the GM’s memory, for the curious" aria-label="Archive: the GM’s memory, for the curious"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9"/><path d="M10 13h4"/></svg><span class="dot"></span></button>
+</nav>
 <div id="modal" class="hidden"></div>
 <aside id="drawer">
-  <header><h1 id="drawerTitle">Archive</h1><button id="closeDrawer">✕</button></header>
+  <header><h1 id="drawerTitle">Archive</h1><button id="pinBtn" title="Keep this panel open beside the chat">📌</button><button id="closeDrawer" title="Close (Esc)">✕</button></header>
   <div class="body ui" id="drawerBody"></div>
 </aside>
 
@@ -365,7 +423,8 @@ async function showList() {
   S.slug = null; clearInterval(S.poll);
   history.replaceState(null, "", "/");
   $("title").textContent = "Campaigns";
-  ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
+  ["back", "rail", "footer"].forEach(id => $(id).classList.add("hidden"));
+  closePanel();
   toggleArt(false);
   setLook(null);
   document.body.dataset.page = "list";
@@ -630,12 +689,17 @@ async function openCampaign(slug) {
   history.replaceState(null, "", "/?c=" + encodeURIComponent(slug));
   S.data = await api(`/api/campaigns/${slug}`);
   $("title").textContent = S.data.meta.name;
-  ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.remove("hidden"));
+  ["back", "rail", "footer"].forEach(id => $(id).classList.remove("hidden"));
   $("newBtn").classList.add("hidden");
   delete document.body.dataset.page;
   setLook(S.data.theme);
   renderChat(true);
   updateStatus(S.data.status, S.data.scenes);
+  closePanel();
+  PSIG = {};
+  updatePanels(S.data.panels);
+  let again = null; try { again = localStorage.getItem("panel:" + slug); } catch {}
+  if (again && document.body.dataset.pinned && matchMedia("(min-width: 1200px)").matches && PANELS[again]) openPanel(again);
   startPoll();
 }
 
@@ -800,7 +864,7 @@ function renderChat(scroll) {
   updateBackdrop();
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
-  $("view").querySelectorAll(".avatar").forEach(a => a.onclick = openSheet);
+  $("view").querySelectorAll(".avatar").forEach(a => a.onclick = () => openPanel("character"));
   $("view").querySelectorAll(".rollreq.live").forEach(card => {
     const go = () => rollDice(card.dataset.roll);
     card.querySelector("[data-act=roll]").onclick = go;
@@ -882,6 +946,7 @@ async function runTurn(path, body, optimisticUser, kind = "chat", extra = {}) {
     $("statusline").textContent = msg;
   }
   S.data = await api(`/api/campaigns/${S.slug}`);
+  updatePanels(S.data.panels);
   setBusy(false);
   renderChat(nearBottom());
   startPoll();
@@ -980,12 +1045,12 @@ function updateStatus(st, scenes) {
   if (st.compacting) bits.push("filing old scenes…");
   if (details && st.condensing) bits.push("condensing the start of this session…");
   if (details && st.last_sheet && Date.now() / 1000 - st.last_sheet.at < 90) bits.push(`📝 sheet: ${st.last_sheet.changes.join("; ")}`);
-  if (st.last_sheet && st.last_sheet.at !== S.sheetSeen) {
-    S.sheetSeen = st.last_sheet.at;
-    if ($("drawer").classList.contains("open") && $("drawerTitle").textContent === "Character") openSheet();
-  }
+  if (details && st.last_cast && Date.now() / 1000 - st.last_cast.at < 90) bits.push(`👥 ${st.last_cast.changes.join("; ")}`);
+  if (st.cast_catchup) bits.push(`reading the story for people… ${Math.round(100 * st.cast_catchup.done / Math.max(1, st.cast_catchup.total))}%`);
+  updatePanels(st.panels);
   if (st.error) bits.push(`⚠ ${st.error}`);
   $("statusline").textContent = bits.join(" · ");
+  $("statusline").title = bits.join(" · ");
 }
 function startPoll() {
   clearInterval(S.poll);
@@ -998,22 +1063,105 @@ function startPoll() {
       S.data.scenes = st.scenes; S.data.status = st;
       updateStatus(st, st.scenes);
       if (changed) renderChat(false);
-      if (!st.tracking && !st.compacting && ++n > 6) clearInterval(S.poll);
+      if (!st.tracking && !st.compacting && !st.casting && ++n > 6) clearInterval(S.poll);
     } catch {}
   }, 3000);
 }
 
-// ---- archive drawer ------------------------------------------------------
-// ---- character sheet --------------------------------------------------------
+// ---- side panels: character, gear, people, places, journal, archive -------------------------
+// The rail's icons open one panel at a time in the drawer. Each panel has a fingerprint from the
+// server (S.data.panels); a dot marks the ones that changed since the player last looked.
+const PANELS = {
+  character: { title: "Character", render: () => renderSheet("character") },
+  gear: { title: "Gear", render: () => renderSheet("gear") },
+  people: { title: "People", render: renderPeople },
+  places: { title: "Places", render: renderPlaces },
+  journal: { title: "Journal", render: renderJournal },
+  archive: { title: "Archive", render: renderArchive },
+};
+const SHEET_PARTS = {
+  character: ["name", "concept", "appearance", "condition", "skills", "companions"],
+  gear: ["money", "gear", "assets"],
+};
 const SHEET_LABELS = { name: "Name", concept: "Concept", appearance: "Appearance", skills: "Skills", condition: "Condition (injuries, status)",
   money: "Money", gear: "Gear", assets: "Assets (ships, vehicles, property)", companions: "Companions",
-  obligations: "Obligations (debts, promises, enemies)" };
-async function openSheet() {
-  $("drawerTitle").textContent = "Character";
+  obligations: "Obligations (debts, promises, deadlines)" };
+let PANEL = null;  // the open panel's name
+let PSIG = {};  // the latest panel fingerprints
+
+function seenKey() { return "seen:" + S.slug; }
+function getSeen() { try { return JSON.parse(localStorage.getItem(seenKey()) || "null"); } catch { return null; } }
+function setSeen(v) { try { localStorage.setItem(seenKey(), JSON.stringify(v)); } catch {} }
+function markSeen(name) {
+  const sig = PSIG[name];
+  if (!sig) return;
+  const seen = getSeen() || {};
+  seen[name] = sig; setSeen(seen);
+}
+// Called whenever fresh fingerprints arrive: light the dots, refresh the open panel if its
+// contents changed underneath it (unless the player is typing in it).
+function updatePanels(sigs) {
+  if (!S.slug || !sigs) return;
+  const prev = PSIG;
+  PSIG = sigs;
+  let seen = getSeen();
+  if (!seen) { seen = { ...sigs }; setSeen(seen); }  // first visit: nothing is "new"
+  for (const b of document.querySelectorAll("#rail [data-panel]")) {
+    const k = b.dataset.panel;
+    b.classList.toggle("changed", !!sigs[k] && seen[k] !== undefined && seen[k] !== sigs[k] && PANEL !== k);
+    if (!(k in seen) && sigs[k]) { seen[k] = sigs[k]; setSeen(seen); }
+  }
+  if (PANEL && sigs[PANEL] && prev[PANEL] !== sigs[PANEL]) {
+    markSeen(PANEL);
+    const typing = $("drawerBody").contains(document.activeElement) &&
+      /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+    if (!typing && !$("drawerBody").querySelector(".editing-person")) PANELS[PANEL].render();
+  }
+}
+
+function openPanel(name) {
+  if (PANEL === name && $("drawer").classList.contains("open")) return closePanel();
+  PANEL = name;
+  $("drawerTitle").textContent = PANELS[name].title;
+  $("drawerBody").innerHTML = `<p class="muted">Loading…</p>`;
   $("drawer").classList.add("open");
+  document.body.dataset.drawer = name;
+  document.querySelectorAll("#rail [data-panel]").forEach(b => b.classList.toggle("on", b.dataset.panel === name));
+  markSeen(name);
+  updatePanels(PSIG);
+  PANELS[name].render();
+  try { localStorage.setItem("panel:" + S.slug, name); } catch {}
+}
+function closePanel() {
+  PANEL = null;
+  $("drawer").classList.remove("open");
+  delete document.body.dataset.drawer;
+  document.querySelectorAll("#rail [data-panel]").forEach(b => b.classList.remove("on"));
+  try { localStorage.removeItem("panel:" + S.slug); } catch {}
+}
+function setPinned(on) {
+  if (on) document.body.dataset.pinned = "1"; else delete document.body.dataset.pinned;
+  $("pinBtn").classList.toggle("on", on);
+  $("pinBtn").title = on ? "Unpin: the panel closes over the chat again" : "Keep this panel open beside the chat";
+  try { localStorage.setItem("pinned", on ? "1" : ""); } catch {}
+}
+// Wide screens: the rail floats at the right edge. Narrow: it sits in the footer by the status.
+function placeRail() {
+  const narrow = matchMedia("(max-width: 900px)").matches;
+  const rail = $("rail");
+  if (narrow && rail.parentElement !== $("railSlot")) $("railSlot").appendChild(rail);
+  if (!narrow && rail.parentElement !== document.body) document.body.insertBefore(rail, $("modal"));
+}
+matchMedia("(max-width: 900px)").addEventListener("change", placeRail);
+
+// ---- character and gear: views of the sheet ---------------------------------------------------
+async function renderSheet(part) {
   const d = await api(`/api/campaigns/${S.slug}/character`);
-  const pt = S.imagesEnabled || S.data.portrait ? await api(`/api/campaigns/${S.slug}/portraits`) : null;
+  if (PANEL !== part) return;
+  const withPortrait = part === "character" && (S.imagesEnabled || S.data.portrait);
+  const pt = withPortrait ? await api(`/api/campaigns/${S.slug}/portraits`) : null;
   const sh = d.sheet || {};
+  const fields = SHEET_PARTS[part];
   $("drawerBody").innerHTML = `
     ${pt ? `<div class="portraitbox">
       <div class="pimg" id="shPortrait" style="${pt.current ? `background-image:url('/api/campaigns/${S.slug}/portraits/${pt.current}')` : ""}">${pt.current ? "" : "no portrait"}</div>
@@ -1022,43 +1170,180 @@ async function openSheet() {
         ${pt.all.length > 1 ? `<div class="thumbs">${pt.all.map(n => `<img src="/api/campaigns/${S.slug}/portraits/${n}" data-name="${n}" class="${n === pt.current ? "cur" : ""}" title="Use this one">`).join("")}</div>` : ""}
       </div></div>` : ""}
     ${d.sheet ? "" : `<p class="muted">No sheet yet: the archivist starts one after the GM's first reply, or fill it in yourself.</p>`}
-    ${d.fields.map(f => d.lists.includes(f)
-      ? `<label>${SHEET_LABELS[f] || f} <span class="muted">(one per line)</span></label><textarea data-f="${f}" rows="${Math.max(2, (sh[f] || []).length + 1)}">${esc((sh[f] || []).join("\n"))}</textarea>`
-      : `<label>${SHEET_LABELS[f] || f}</label><input data-f="${f}" value="${esc(sh[f] || "")}">`).join("")}
-    <p><button class="primary" id="saveSheet">Save sheet</button> <span id="sheetMsg" class="muted"></span></p>
+    ${sheetFieldsHTML(fields, sh, d.lists)}
+    <p><button class="primary" id="saveSheet">Save</button> <span id="sheetMsg" class="muted"></span></p>
     <h3>Recent changes</h3>
     ${d.history.length ? `<ul>${d.history.map(h => `<li>${esc(h.what)} <span class="muted">· ${new Date(h.ts * 1000).toLocaleString()}</span></li>`).join("")}</ul>` : `<p class="muted">none yet</p>`}
-    <p class="muted">The archivist updates this after each GM reply (money, gear, injuries, companions, debts). The GM sees it every turn and keeps to it.</p>`;
+    <p class="muted">The archivist updates the sheet after each GM reply (money, gear, injuries, companions, debts). The GM sees it every turn and keeps to it.</p>`;
   $("shPaint")?.addEventListener("click", async () => {
     $("shPaint").disabled = true; $("shPaintMsg").textContent = "Painting… (~10–30 s)";
     try {
       const appearance = $("drawerBody").querySelector("[data-f=appearance]")?.value || "";
       const r = await api(`/api/campaigns/${S.slug}/portraits`, { method: "POST", body: JSON.stringify({ appearance }) });
-      S.data.portrait = r.current; renderChat(false); openSheet();
+      S.data.portrait = r.current; renderChat(false); renderSheet(part);
     } catch (e) { $("shPaintMsg").textContent = e.message; $("shPaint").disabled = false; }
   });
   $("drawerBody").querySelectorAll(".thumbs img").forEach(img => img.onclick = async () => {
     await api(`/api/campaigns/${S.slug}/portrait`, { method: "PUT", body: JSON.stringify({ name: img.dataset.name }) });
-    S.data.portrait = img.dataset.name; renderChat(false); openSheet();
+    S.data.portrait = img.dataset.name; renderChat(false); renderSheet(part);
   });
-  $("saveSheet").onclick = async () => {
-    const body = {};
-    $("drawerBody").querySelectorAll("[data-f]").forEach(el => {
-      body[el.dataset.f] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.value;
-    });
-    try { await api(`/api/campaigns/${S.slug}/character`, { method: "PUT", body: JSON.stringify(body) }); openSheet(); }
-    catch (e) { $("sheetMsg").textContent = e.message; }
-  };
+  $("saveSheet").onclick = () => saveSheetFields(sh, () => renderSheet(part));
+}
+function sheetFieldsHTML(fields, sh, lists) {
+  return fields.map(f => lists.includes(f)
+    ? `<label>${SHEET_LABELS[f] || f} <span class="muted">(one per line)</span></label><textarea data-f="${f}" rows="${Math.max(2, (sh[f] || []).length + 1)}">${esc((sh[f] || []).join("\n"))}</textarea>`
+    : `<label>${SHEET_LABELS[f] || f}</label><input data-f="${f}" value="${esc(sh[f] || "")}">`).join("");
+}
+// Each panel edits only its own fields: merge them into the latest sheet before saving.
+async function saveSheetFields(old, done) {
+  const body = { ...((await api(`/api/campaigns/${S.slug}/character`)).sheet || old) };
+  $("drawerBody").querySelectorAll("[data-f]").forEach(el => {
+    body[el.dataset.f] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.value;
+  });
+  try {
+    await api(`/api/campaigns/${S.slug}/character`, { method: "PUT", body: JSON.stringify(body) });
+    await refreshSigs(); done();
+  } catch (e) { $("sheetMsg").textContent = e.message; }
+}
+async function refreshSigs() {
+  try { const st = await api(`/api/campaigns/${S.slug}/status`); PSIG = st.panels; markSeen(PANEL); updatePanels(st.panels); } catch {}
 }
 
-async function openDrawer() {
-  $("drawerTitle").textContent = "Archive";
-  $("drawer").classList.add("open");
+// ---- people ----------------------------------------------------------------------------------
+const PERSON_FIELDS = [["pronouns", "Pronouns"], ["role", "Role"], ["look", "Looks"], ["where", "Where"], ["standing", "Attitude to you"]];
+let PEOPLE = [];
+async function renderPeople() {
+  const d = await api(`/api/campaigns/${S.slug}/people`);
+  if (PANEL !== "people") return;
+  PEOPLE = d.people;
+  const behind = d.latest - d.until;
+  const progress = d.catching_up
+    ? `<p class="muted">Reading the story for people… (${Math.round(100 * d.catching_up.done / Math.max(1, d.catching_up.total))}%)</p>`
+    : d.reading ? `<p class="muted">Reading the latest turn…</p>`
+    : behind > 4 ? `<p class="muted">${d.until ? "Some of the story hasn't been read for people yet." : "This campaign started before the People list: the archivist can read the story so far to fill it in."} <button id="readPeople">Read the story</button></p>` : "";
+  $("drawerBody").innerHTML = `
+    ${progress}
+    ${PEOPLE.length > 6 ? `<input id="peopleFilter" placeholder="Find someone…" style="margin:4px 0 6px">` : ""}
+    <div id="peopleList"></div>
+    <p><button id="addPerson">+ Add someone</button></p>
+    <p class="muted">Everyone your character has met. The archivist adds people after each GM reply; their pronouns, looks and role are kept as first described, so the GM stays consistent. Fix anything that's wrong with Edit: the GM sees people in play every turn.</p>`;
+  drawPeople("");
+  $("peopleFilter")?.addEventListener("input", (e) => drawPeople(e.target.value));
+  $("addPerson").onclick = () => {
+    PEOPLE.unshift({ name: "", aliases: [], pronouns: "", role: "", look: "", where: "", standing: "", notes: [], first: 0, last: 0, _new: true });
+    drawPeople(""); editPerson(0);
+  };
+  $("readPeople")?.addEventListener("click", async () => {
+    $("readPeople").disabled = true;
+    await api(`/api/campaigns/${S.slug}/people/refresh`, { method: "POST" });
+    startPoll(); setTimeout(() => PANEL === "people" && renderPeople(), 1500);
+  });
+  if (d.catching_up || d.reading) setTimeout(() => PANEL === "people" && !$("drawerBody").querySelector(".editing-person") && renderPeople(), 4000);
+}
+function sceneOfMsg(id) { const sc = sceneFor(id); return sc ? sc.id : null; }
+function drawPeople(filter) {
+  const q = filter.trim().toLowerCase();
+  const shown = PEOPLE.map((p, i) => [p, i]).filter(([p]) => !q || JSON.stringify(p).toLowerCase().includes(q));
+  $("peopleList").innerHTML = shown.map(([p, i]) => {
+    const seen = p.last ? sceneOfMsg(p.last) : null;
+    return `<div class="pcard" data-i="${i}">
+      <div class="ptop"><div><span class="pname">${esc(p.name || "(new)")}</span>${p.pronouns ? ` <span class="muted">· ${esc(p.pronouns)}</span>` : ""}</div>
+        <button class="edit" data-edit="${i}">Edit</button></div>
+      ${p.role ? `<div class="pline">${esc(p.role)}</div>` : ""}
+      ${p.aliases?.length ? `<div class="pline muted">also: ${esc(p.aliases.join(", "))}</div>` : ""}
+      ${p.look ? `<div class="pline"><span class="muted">Looks:</span> ${esc(p.look)}</div>` : ""}
+      ${p.where ? `<div class="pline"><span class="muted">Where:</span> ${esc(p.where)}</div>` : ""}
+      ${p.standing ? `<div class="pline"><span class="muted">Attitude:</span> ${esc(p.standing)}</div>` : ""}
+      ${p.notes?.length ? `<ul>${p.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+      ${seen ? `<div class="pline muted small">last seen in scene ${seen}</div>` : ""}
+    </div>`;
+  }).join("") || `<p class="muted">${q ? "Nobody matches." : "Nobody yet: people are added as you meet them."}</p>`;
+  $("peopleList").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editPerson(+b.dataset.edit));
+}
+function editPerson(i) {
+  const p = PEOPLE[i];
+  const card = $("peopleList").querySelector(`.pcard[data-i="${i}"]`);
+  card.classList.add("editing-person");
+  card.innerHTML = `
+    <label>Name</label><input data-pf="name" value="${esc(p.name)}">
+    <label>Also known as <span class="muted">(comma-separated)</span></label><input data-pf="aliases" value="${esc((p.aliases || []).join(", "))}">
+    ${PERSON_FIELDS.map(([k, label]) => `<label>${label}</label><input data-pf="${k}" value="${esc(p[k] || "")}">`).join("")}
+    <label>Notes <span class="muted">(one per line)</span></label><textarea data-pf="notes" rows="${Math.max(2, (p.notes || []).length + 1)}">${esc((p.notes || []).join("\n"))}</textarea>
+    <div class="row-actions"><button class="primary" data-a="save">Save</button><button data-a="cancel">Cancel</button>
+      ${p._new ? "" : `<button data-a="del" title="Remove this person (e.g. a duplicate or a mistake)">Remove</button>`}<span class="muted small" data-a="msg"></span></div>`;
+  card.querySelector("[data-pf=name]").focus();
+  card.querySelector("[data-a=cancel]").onclick = () => renderPeople();
+  card.querySelector("[data-a=del]")?.addEventListener("click", () => {
+    if (!confirm(`Remove ${p.name} from People?`)) return;
+    savePeople(PEOPLE.filter((_, j) => j !== i), card);
+  });
+  card.querySelector("[data-a=save]").onclick = () => {
+    const v = (k) => card.querySelector(`[data-pf=${k}]`).value.trim();
+    if (!v("name")) return card.querySelector("[data-pf=name]").focus();
+    const upd = { ...p, name: v("name"), aliases: v("aliases").split(",").map(x => x.trim()).filter(Boolean),
+      notes: v("notes").split("\n").map(x => x.trim()).filter(Boolean) };
+    for (const [k] of PERSON_FIELDS) upd[k] = v(k);
+    if (upd._new) { const last = S.data.messages[S.data.messages.length - 1]; upd.first = upd.last = last ? last.id : 0; }
+    delete upd._new;
+    savePeople(PEOPLE.map((x, j) => j === i ? upd : x), card);
+  };
+}
+async function savePeople(list, card) {
+  try {
+    await api(`/api/campaigns/${S.slug}/people`, { method: "PUT", body: JSON.stringify({ people: list.filter(p => !p._new) }) });
+    await refreshSigs(); renderPeople();
+  } catch (e) { card.querySelector("[data-a=msg]").textContent = e.message; }
+}
+
+// ---- places ----------------------------------------------------------------------------------
+async function renderPlaces() {
+  const d = await api(`/api/campaigns/${S.slug}/places`);
+  if (PANEL !== "places") return;
+  const card = (p, here) => `<div class="pcard ${here ? "here" : ""}">
+    <div class="ptop"><span class="pname">${here ? "📍 " : ""}${esc(p.name)}</span>
+      ${p.visits ? `<span class="muted small">${p.visits > 1 ? `${p.visits} scenes · ` : ""}last: scene ${p.last_scene}</span>` : ""}</div>
+    ${p.summary ? `<div class="pline">${esc(p.summary)}</div>` : ""}
+    ${p.people?.length ? `<div class="pline"><span class="muted">People here:</span> ${esc(p.people.join(", "))}</div>` : ""}
+  </div>`;
+  const cur = d.visited.find(v => v.name === d.current);
+  const rest = d.visited.filter(v => v !== cur);
+  $("drawerBody").innerHTML = `
+    <h3>You are here</h3>
+    ${cur ? card(cur, true) : d.current ? card({ name: d.current }, true) : `<p class="muted">Not known yet.</p>`}
+    ${rest.length ? `<h3>Where you've been</h3>${rest.map(p => card(p)).join("")}` : ""}
+    ${d.known.length ? `<h3>Heard of</h3>${d.known.map(p => card(p)).join("")}` : ""}
+    <p class="muted">Places come from where each scene happens; descriptions are added as scenes are filed.</p>`;
+}
+
+// ---- journal ---------------------------------------------------------------------------------
+async function renderJournal() {
+  const [d, ch] = await Promise.all([api(`/api/campaigns/${S.slug}/journal`), api(`/api/campaigns/${S.slug}/character`)]);
+  if (PANEL !== "journal") return;
+  const story = [...d.story].reverse();
+  $("drawerBody").innerHTML = `
+    <h3>Promises, debts and deadlines</h3>
+    ${sheetFieldsHTML(["obligations"], ch.sheet || {}, ch.lists).replace(/<label>.*?<\/label>/, "")}
+    <p><button id="saveSheet">Save</button> <span id="sheetMsg" class="muted"></span></p>
+    ${d.situation ? `<h3>Where things stand</h3><div class="drawer-md">${md(d.situation)}</div>` : ""}
+    ${d.threads ? `<h3>Open threads</h3><div class="drawer-md">${md(d.threads)}</div>` : ""}
+    ${d.situation || d.threads ? `<p class="muted small">As of scene ${d.as_of}, the last one filed${d.unfiled > 2 ? `; the ${d.unfiled} scenes since are filed after a break in play` : ""}.</p>` : ""}
+    ${d.earlier ? `<details ${d.unfiled > 2 ? "open" : ""}><summary><strong>Earlier this session</strong> <span class="muted">(condensed)</span></summary><div class="drawer-md">${md(d.earlier)}</div></details>` : ""}
+    <h3>The story so far</h3>
+    ${story.length ? story.map(s => `<div class="pcard">
+      <div class="ptop"><span class="pname">Scene ${s.scene}${s.title ? ": " + esc(s.title) : ""}</span>${s.live ? `<span class="muted small">in play</span>` : ""}</div>
+      ${s.location ? `<div class="pline muted">${esc(s.location)}</div>` : ""}
+      ${s.summary ? `<div class="pline">${esc(s.summary)}</div>` : ""}</div>`).join("") : `<p class="muted">Nothing yet.</p>`}`;
+  $("saveSheet").onclick = () => saveSheetFields(ch.sheet || {}, renderJournal);
+}
+
+// ---- archive: how the GM's memory works (for the curious) --------------------------------------
+async function renderArchive() {
   const st = await api(`/api/campaigns/${S.slug}/status`);
   const gz = await api(`/api/campaigns/${S.slug}/file?path=gazetteer.yaml`);
+  if (PANEL !== "archive") return;
   const ctx = st.last_context;
   $("drawerBody").innerHTML = `
-    <h3>Campaign brief</h3><a data-path="brief.md">brief.md</a> · <a data-path="timeline.md">timeline.md</a> · <a data-path="gazetteer.yaml">gazetteer.yaml</a>
+    <h3>Campaign brief</h3><a data-path="brief.md">brief.md</a> · <a data-path="timeline.md">timeline.md</a> · <a data-path="gazetteer.yaml">gazetteer.yaml</a> · <a data-path="cast.yaml">cast.yaml</a>
     <h3>Scenes</h3><ol>${st.scenes.map(s => `<li>${s.note ? `<a data-path="${esc(s.note)}">${esc(s.title || "untitled")}</a>` : esc(s.title || "(in progress)")}
       <span class="muted">${esc(s.location || "")} · ${s.status}${s.confidence ? ` · ${Math.round(s.confidence * 100)}%` : ""}</span></li>`).join("")}</ol>
     <p><button id="compactNow">File closed scenes now</button> <span class="muted">normally automatic after ${esc("idle")}</span></p>
@@ -1081,7 +1366,7 @@ async function openDrawer() {
     $("compactNow").disabled = true; $("compactNow").textContent = "Filing… (can take a few minutes)";
     try { await api(`/api/campaigns/${S.slug}/compact`, { method: "POST" }); }
     catch (e) { alert(e.message); }
-    S.data = await api(`/api/campaigns/${S.slug}`); renderChat(false); openDrawer();
+    S.data = await api(`/api/campaigns/${S.slug}`); renderChat(false); renderArchive();
   };
 }
 
@@ -1102,13 +1387,16 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !S.slug) return;
   if (S.busy) { e.preventDefault(); cancelTurn(); }
   else if (S.editing) { e.preventDefault(); $("input").value = ""; autosize(); stopEditing(); }
+  else if (PANEL && $("modal").classList.contains("hidden") && !($("drawer").contains(document.activeElement) && /INPUT|TEXTAREA/.test(document.activeElement.tagName))) { e.preventDefault(); closePanel(); }
 });
 $("send").onclick = send;
 $("back").onclick = showList;
 $("newBtn").onclick = openNewCampaign;
-$("archiveBtn").onclick = openDrawer;
-$("sheetBtn").onclick = openSheet;
-$("closeDrawer").onclick = () => $("drawer").classList.remove("open");
+document.querySelectorAll("#rail [data-panel]").forEach(b => b.onclick = () => openPanel(b.dataset.panel));
+$("closeDrawer").onclick = closePanel;
+$("pinBtn").onclick = () => setPinned(!document.body.dataset.pinned);
+try { setPinned(localStorage.getItem("pinned") === "1"); } catch {}
+placeRail();
 (async () => {
   try {
     const st = await api("/api/status");

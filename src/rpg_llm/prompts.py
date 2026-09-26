@@ -389,6 +389,38 @@ Return JSON: changes (a list of short notes of what changed, under 12 words each
 "Paid 20 Cr for fuel"; no explanations or reasoning; empty if nothing changed), changed (bool),
 sheet (the full updated sheet)."""
 
+CAST_TASK = """\
+Task: keep the list of people the player character has met in a solo role-playing game.
+The player character is {player}: never list them.
+
+People already recorded:
+{cast}
+
+Read the new part of the story below and return the NAMED people (and named AIs, robots or
+creatures that talk) who appear in it or are talked about, with what it shows about them. Use a
+recorded person's name exactly as recorded. Leave out unnamed people ("the guard", "a clerk").
+Leave out people who are only named in passing with nothing shown about them.
+
+For each person, fill in only what the text actually shows; leave the rest empty (""):
+- name: their personal name, as full as the text gives it ("Captain E. Dunn", "Kess"), never
+  just a job title; aliases: other names or shorter forms used for them ("Dunn", "B. Kess")
+- pronouns: how the text refers to them, e.g. "he", "she", "they", "it". Empty if the text
+  never uses a pronoun or gendered word for them.
+- role: what they are or do, a few words ("freight broker at Harlow South port authority")
+- look: what they look like, only details the text describes ("grey-haired, round glasses")
+- where: where they are now, if the text says
+- standing: their attitude to the player character, a few words ("helpful, businesslike")
+- note: one short fact from this part worth remembering later: a deal, promise, debt, secret,
+  what they want or did that matters (under 20 words). Not jokes, moods or small talk. Empty if
+  nothing new.
+
+Keep every value short. No reasoning, no questions, no guesses.
+
+The new part of the story:
+{exchange}
+
+Return JSON: people (a list, empty if no named person appears)."""
+
 SHEET_START_TASK = """\
 Create the player character's starting sheet for a new solo campaign, from the premise and the
 game. Fill in sensible, concrete starting values that fit both: money as an amount in the

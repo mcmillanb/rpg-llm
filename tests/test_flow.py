@@ -4,7 +4,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from rpg_llm import compactor, context, router, wiki
+from rpg_llm import cast, compactor, context, panels, router, sheet, wiki
 from rpg_llm.app import Runtime, create_app
 from rpg_llm.config import AppConfig, Env, Settings, Tuning
 from rpg_llm.vault import Scene, State, Vault
@@ -893,3 +893,113 @@ def test_old_text_roll_request_is_playable(tmp_path):
         events = sse_events(client.post(f"/api/campaigns/{slug}/roll", json={"id": req["id"]}))
         assert events[0]["type"] == "rolled"
         assert client.get(f"/api/campaigns/{slug}").json()["messages"][-1]["content"] == "The concrete cracks cleanly."
+
+
+# ---- cast -----------------------------------------------------------------
+
+def person(name, **kw):
+    return {"name": name, "aliases": [], "pronouns": "", "role": "", "look": "", "where": "",
+            "standing": "", "note": "", **kw}
+
+
+def test_cast_keeps_pronouns_and_looks_once_set_and_matches_short_names():
+    people = []
+    assert cast.merge(people, [person("B. Kess", pronouns="He", role="freight broker",
+                                      look="grey hair, glasses", note="Sold a licence")], 10,
+                      "Callen Vane") == ["Met B. Kess"]
+    cast.merge(people, [person("Kess", pronouns="she", role="licensing clerk", look="young",
+                               where="Gate 7", standing="friendly", note="Wait, is she?"),
+                        person("Callen", pronouns="he"),
+                        person("Ben Vane", pronouns="he", role="grandfather")], 20, "Callen Vane")
+    kess = cast.find(people, "Kess")
+    assert (kess["name"], kess["pronouns"], kess["role"], kess["look"]) == \
+        ("B. Kess", "he", "freight broker", "grey hair, glasses")
+    assert (kess["where"], kess["standing"], kess["notes"]) == ("Gate 7", "friendly", ["Sold a licence"])
+    assert (kess["first"], kess["last"]) == (10, 20)
+    assert [p["name"] for p in people] == ["B. Kess", "Ben Vane"]  # never the player character
+    cast.merge(people, [person("the guard", pronouns="he"), person("Oren", role="location (town)"),
+                        person("Mother", aliases=["she", "Ship", "the one in your ear"], pronouns="I")], 30)
+    assert [p["name"] for p in people] == ["B. Kess", "Ben Vane", "Mother"]
+    assert people[-1]["pronouns"] == "" and people[-1]["aliases"] == ["Ship"]
+    assert cast.pronouns("He/Him") == "he/him" and cast.pronouns("unknown") == ""
+    cast.merge(people, [person("The Mule", pronouns="it", role="six-wheeled vehicle")], 35)
+    assert "The Mule" not in [p["name"] for p in people]
+    assert cast.merge(people, [person("Clerk", pronouns="she"), person("Silas")], 40,
+                      source="The clerk sends you to Silas.") == ["Met Silas"]
+
+
+async def test_cast_catches_up_in_chunks_rewinds_and_rides_in_gm_notes(vault, monkeypatch):
+    c = vault.create("Test")
+    monkeypatch.setattr(cast, "CHUNK_CHARS", 50)
+    play(c, ("I look for a broker", "A man named Kess waves you over."),
+            ("I talk to Kess", "Kess stamps the form. Marta rents diggers."))
+    llm = FakeLLM([{"people": [person("Kess", pronouns="he", role="broker")]},
+                   {"people": [person("Kess", note="Stamped the form"),
+                               person("Marta", pronouns="she", role="rents diggers")]}])
+    changes = await cast.catch_up(c, llm, asyncio.Lock())
+    assert changes == ["Met Kess", "Met Marta"] and len(llm.calls) == 2
+    assert cast.load_all(c)["until"] == 4
+    assert await cast.catch_up(c, FakeLLM([]), asyncio.Lock()) == []  # nothing new
+
+    c.append({"role": "user", "content": "I ask Kess about Marta"})
+    block = cast.notes_block(c, c.messages())
+    assert "- Kess (he): broker. Stamped the form." in block and "slipped" in block and "Marta (she)" in block
+
+    assert cast.rewind(c, 3)  # the second exchange taken back
+    assert [p["name"] for p in cast.people(c)] == ["Kess"]
+    assert cast.load_all(c)["until"] == 2
+
+
+def test_panels_split_the_sheet_and_read_the_journal(vault):
+    c = vault.create("Test")
+    sheet.save(c, {"name": "Callen", "money": "84 Cr", "obligations": ["Photos to Kess in 2 days"]},
+               0, "x")
+    c.write("brief.md", "# T\n\n## Situation\n\nAt the yard.\n\n## Active threads\n\n- Dig out the ship\n")
+    c.write("timeline.md", "# Timeline\n- [[scenes/001-a|Scene 1: The Yard]] at "
+                           "[[locations/gate-7|Gate 7]]: Callen rents a digger.\n")
+    j = panels.journal(c)
+    assert j["obligations"] == ["Photos to Kess in 2 days"] and j["threads"] == "- Dig out the ship"
+    assert j["situation"] == "At the yard."
+    assert j["story"][0] == {"scene": 1, "title": "The Yard", "location": "Gate 7",
+                             "summary": "Callen rents a digger."}
+    before = panels.signatures(c)
+    sheet.save(c, {**sheet.load(c), "money": "60 Cr"}, 0, "x")
+    after = panels.signatures(c)
+    assert before["gear"] != after["gear"] and before["character"] == after["character"]
+
+
+def test_people_places_and_journal_endpoints(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    rt = Runtime(settings, dm=FakeLLM(), router_llm=FakeLLM(), archiver=FakeLLM())
+    c = rt.vault.create("Test")
+    play(c, ("hi", "Kess waves."))
+    with TestClient(create_app(rt)) as client:
+        base = f"/api/campaigns/{c.slug}"
+        assert client.get(base + "/people").json()["people"] == []
+        kess = {"name": "Kess", "aliases": ["B. Kess"], "pronouns": "he", "role": "broker"}
+        people = client.put(base + "/people", json={"people": [kess]}).json()["people"]
+        assert people[0]["pronouns"] == "he" and people[0]["notes"] == []
+        assert client.get(base + "/people").json()["people"][0]["name"] == "Kess"
+        assert client.get(base + "/places").json()["visited"] == []
+        assert client.get(base + "/journal").json()["story"][0]["scene"] == 1
+        assert set(client.get(base + "/status").json()["panels"]) == \
+            {"character", "gear", "people", "places", "journal"}
+
+
+def test_player_name_falls_back_to_the_premise(vault):
+    c = vault.create("Test", premise="Calvin is a scrappy young scavenger on Aridor-3.")
+    assert cast.player_name(c) == "Calvin"
+    sheet.save(c, {"name": "Calvin Mercer"}, 0, "x")
+    assert cast.player_name(c) == "Calvin Mercer"
+
+
+def test_notes_correct_a_person_the_gm_misgendered(vault):
+    c = vault.create("Test")
+    sheet.save(c, {"name": "Callen"}, 0, "x")
+    cast.save(c, {"until": 4, "people": [{"name": "Kess", "pronouns": "he", "role": "broker"},
+                                         {"name": "Marta", "pronouns": "she"}]}, "x")
+    play(c, ("hi", "Kess adjusts her glasses. She smiles. Kess taps her stylus."),
+            ("ok", "Tell her Kess sent you, says Marta. Kess nods."))
+    block = cast.notes_block(c, c.messages())
+    assert 'Correction: Kess is he. Recent replies wrongly used "she"' in block
+    assert "Correction: Marta" not in block

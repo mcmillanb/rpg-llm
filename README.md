@@ -26,8 +26,20 @@ Each campaign also has:
   are off by default; you can always take a message back while the GM is still replying (Esc).
 - **A character sheet** (money, gear, injuries, skills, assets, companions, debts). New
   campaigns start with one written from the premise; the router updates it after every reply;
-  you can edit it (the Sheet button). The GM sees it every turn and keeps to it. Taking a turn
-  back also undoes what that turn did to the sheet.
+  you can edit it. The GM sees it every turn and keeps to it. Taking a turn back also undoes
+  what that turn did to the sheet.
+- **Reminder panels** for forgetful humans: a rail of icons beside the chat (in the footer on a
+  phone) opens **Character**, **Gear** (money, kit, ship and property), **People** (everyone
+  you've met: pronouns, role, looks, where they are, how they feel about you, a few notes),
+  **Places** (where you are, where you've been, what's there), and a **Journal** (promises,
+  debts and deadlines, open threads, the story so far). A dot marks a panel that changed since
+  you last looked; on a wide screen you can pin one open beside the chat. They only show what
+  your character knows, never the story arc.
+- **A cast list:** after each reply the router records the named people in it. Pronouns, looks
+  and role are written once and kept (only you can change them), and the people in play ride in
+  the GM's notes every turn, so a character can't quietly change sex or job. If recent replies
+  did slip, the notes tell the GM to correct it. An older campaign reads its whole story for
+  people the first time (a few minutes, in the background).
 - **A hidden story arc:** GM-only notes (the real conflict, factions, possible beats and
   climaxes, secrets) written at setup and revised between sessions when play goes somewhere
   else. It's guidance, not rails. The play page can't show it; admin can, behind a spoiler
@@ -106,6 +118,7 @@ vault/campaigns/<campaign>/
   brief.md           always in the GM's context
   arc.md             hidden story arc (GM only); earlier versions in arc-history/
   character.yaml     character sheet; every version in character.history.jsonl
+  cast.yaml          people met (pronouns, role, looks, notes); recent versions in cast.history.jsonl
   transcript.jsonl   everything ever said (append-only; regenerate/edit supersede, never delete)
   state.yaml         scene boundaries and status
   gazetteer.yaml     wiki index: name, aliases, type, path, one-line summary

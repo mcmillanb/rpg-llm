@@ -9,7 +9,7 @@ import logging
 import re
 import time
 
-from rpg_llm import arc, prompts, router, wiki
+from rpg_llm import arc, cast, prompts, router, wiki
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, State, slugify
 
@@ -70,6 +70,10 @@ async def file_scene(campaign: Campaign, archiver: LLMClient, state: State, scen
     known = wiki.mentioned(gazetteer, transcript)
     known_text = "\n".join(f"- {e['name']}: {wiki.current_state(campaign, e['path'])}"
                            for e in known) or "(none)"
+    people = cast.mentioned(cast.people(campaign), transcript)
+    if people:  # the cast's records: keep pronouns and roles as established
+        known_text += ("\n\nPeople as recorded (keep their pronouns and roles):\n"
+                       + "\n".join(cast.line(p, notes=0) for p in people))
     data = await archiver.json(
         [{"role": "system", "content": prompts.ARCHIVE_SYSTEM},
          {"role": "user", "content": prompts.ARCHIVE_SCENE_TASK.format(

@@ -12,8 +12,8 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import (admin, arc, compactor, context, dice, images, portrait, router, sheet,
-                     suggest, themes, wiki)
+from rpg_llm import (admin, arc, cast, compactor, context, dice, images, panels, portrait, router,
+                     sheet, suggest, themes, wiki)
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -43,6 +43,7 @@ class Runtime:
         self.seen: dict[str, float] = {}  # last time the player's browser touched a campaign
         self.turns: dict[str, int] = {}  # turns in progress per campaign
         self.tasks: set[asyncio.Task] = set()
+        self.casting: set[str] = set()  # campaigns whose cast is being brought up to date
         self.reload()
 
     def reload(self) -> None:
@@ -71,7 +72,8 @@ class Runtime:
     def st(self, slug: str) -> dict:
         return self.status.setdefault(slug, {"tracking": False, "compacting": False,
                                              "condensing": False,
-                                             "last_sheet": None,
+                                             "last_sheet": None, "last_cast": None,
+                                             "cast_catchup": None,
                                              "last_verdict": None, "last_compaction": None,
                                              "last_context": None, "error": None})
 
@@ -124,6 +126,28 @@ class Runtime:
                 st["condensing"] = False
         finally:
             st["tracking"] = False
+        await self.run_cast(c)  # after: an older campaign's first catch-up can take minutes
+
+    async def run_cast(self, c: Campaign) -> None:
+        """Record the people in the new exchange (or, for an older campaign, its whole story so
+        far). One at a time per campaign: a running catch-up picks up newer turns itself."""
+        if c.slug in self.casting or self.router is None:
+            return
+        st = self.st(c.slug)
+        self.casting.add(c.slug)
+        try:
+            def progress(done, total):
+                st["cast_catchup"] = {"done": done, "total": total} if done < total else None
+            changes = await cast.catch_up(c, self.router, self.lock(c.slug),
+                                          cast.player_name(c), progress)
+            if changes:
+                st["last_cast"] = {"changes": changes, "at": time.time()}
+        except Exception as e:
+            log.exception("cast update failed")
+            st["error"] = f"people: {e}"
+        finally:
+            st["cast_catchup"] = None
+            self.casting.discard(c.slug)
 
     async def tail_budget(self) -> int:
         window = await self.dm.context_window() or 32768
@@ -216,7 +240,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                                         rt.settings.tuning.gatekeeper_timeout)
     info["seconds"] = round(time.time() - t0, 1)
     notes = "\n\n".join(p for p in (context.style_reminder(c.meta), sheet.notes_block(sheet.load(c)),
-                                     notes) if p) or None
+                                     cast.notes_block(c, messages), notes) if p) or None
     info["notes"] = notes
     st["last_context"] = info
     yield sse({"type": "context", **info})
@@ -427,6 +451,10 @@ def replied(msgs: list[dict]) -> bool:
 NO_REWIND = "Rewinds are off for this campaign: the GM's reply stands. (Allow them in the campaign's settings.)"
 
 
+class PeopleIn(BaseModel):
+    people: list[dict]
+
+
 class Say(BaseModel):
     content: str
 
@@ -622,7 +650,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
                 "themes": themes.public(),
                 "messages": msgs,
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
-                "status": rt.st(c.slug)}
+                "status": rt.st(c.slug), "panels": panels.signatures(c)}
 
     @app.get("/api/campaigns/{slug}/status")
     async def get_status(slug: str):
@@ -631,6 +659,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         c = rt.campaign(slug)
         state = c.load_state()
         return {**rt.st(slug), "scenes": [vars(s) for s in state.scenes],
+                "panels": panels.signatures(c), "casting": slug in rt.casting,
                 "live_start": state.live_start(), "gazetteer_size": len(c.gazetteer())}
 
     @app.get("/api/campaigns/{slug}/file")
@@ -669,6 +698,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         user = msgs[-2] if dead else msgs[-1]
         router.undo_scenes_from(c, user["id"])
         sheet.rewind(c, user["id"])
+        cast.rewind(c, user["id"])
         if dead:
             # hide the old reply immediately; the new one also records what it replaced
             c.append({"role": "system", "content": "", "supersedes": dead})
@@ -690,6 +720,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
         sheet.rewind(c, last_user["id"])
+        cast.rewind(c, last_user["id"])
         c.append({"role": "user", "content": body.content.strip(), "supersedes": dead})
         return stream_turn(rt, c)
 
@@ -708,6 +739,44 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         async with rt.lock(slug):
             saved = sheet.save(c, body, msgs[-1]["id"] if msgs else 0, "edited by the player")
         return {"sheet": saved}
+
+    @app.get("/api/campaigns/{slug}/people")
+    async def get_people(slug: str):
+        rt = R()
+        c = rt.campaign(slug)
+        msgs = c.messages()
+        return {"people": sorted(cast.people(c), key=lambda p: -p["last"]),
+                "until": cast.load_all(c)["until"], "latest": msgs[-1]["id"] if msgs else 0,
+                "catching_up": rt.st(slug).get("cast_catchup"),
+                "reading": slug in rt.casting}
+
+    @app.put("/api/campaigns/{slug}/people")
+    async def put_people(slug: str, body: PeopleIn):
+        """The player's edits: the whole list (edited, added or removed people)."""
+        rt = R()
+        c = rt.campaign(slug)
+        async with rt.lock(slug):
+            data = cast.load_all(c)
+            data["people"] = body.people
+            saved = cast.save(c, data, "edited by the player")
+        return {"people": sorted(saved["people"], key=lambda p: -p["last"])}
+
+    @app.post("/api/campaigns/{slug}/people/refresh")
+    async def refresh_people(slug: str):
+        """Read any part of the story the cast hasn't seen yet (e.g. an older campaign)."""
+        rt = R()
+        rt.require_configured()
+        c = rt.campaign(slug)
+        rt.spawn(rt.run_cast(c))
+        return {"started": slug not in rt.casting}
+
+    @app.get("/api/campaigns/{slug}/places")
+    async def get_places(slug: str):
+        return panels.places(R().campaign(slug))
+
+    @app.get("/api/campaigns/{slug}/journal")
+    async def get_journal(slug: str):
+        return panels.journal(R().campaign(slug))
 
     @app.post("/api/campaigns/{slug}/roll")
     async def player_roll(slug: str, body: RollIn):
@@ -742,6 +811,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
         sheet.rewind(c, last_user["id"])
+        cast.rewind(c, last_user["id"])
         c.append({"role": "system", "content": "", "supersedes": dead, "unsent": True})
         return {"content": last_user["content"]}
 
