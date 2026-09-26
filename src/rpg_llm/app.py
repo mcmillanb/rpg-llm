@@ -230,10 +230,13 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
 
     convo = context.build(c, state, messages, notes)
     tools = list(wiki.TOOLS) if c.gazetteer() else []  # nothing to look up yet
-    if context.table(c.meta)["dice"] == "auto":
+    mode = context.table(c.meta)["dice"]
+    if mode == "auto":
         tools.append(dice.TOOL)
+    elif mode == "virtual":
+        tools.append(dice.REQUEST_TOOL)
     kwargs = {"tools": tools} if tools else {}
-    rolls = []
+    rolls, requested = [], None
     if not rt.settings.app.dm.thinking:
         kwargs["extra_body"] = NO_THINKING
     content, reasoning, trace = "", "", []
@@ -276,7 +279,15 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
              "function": {"name": tc["name"], "arguments": tc["arguments"]}}
             for i, tc in enumerate(calls)]})
         for i, tc in enumerate(calls):
-            if tc["name"] == "roll_dice":
+            if tc["name"] == "request_roll":
+                try:  # the player rolls next: end the turn here, outcome untold
+                    requested = dice.request(json.loads(tc["arguments"] or "{}"),
+                                             dice.roll_under_system(c.meta.get("system") or ""))
+                    yield sse({"type": "roll_request", **requested})
+                    break
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    result = f"Error: {e}"
+            elif tc["name"] == "roll_dice":
                 try:
                     args = json.loads(tc["arguments"] or "{}")
                     r = dice.roll(str(args.get("dice", "")), str(args.get("reason", "")),
@@ -291,6 +302,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                 yield sse({"type": "tool", "name": tc["name"], "arguments": tc["arguments"]})
             trace.append({"tool": tc["name"], "arguments": tc["arguments"], "result": result[:2000]})
             convo.append({"role": "tool", "tool_call_id": tc["id"] or f"call_{i}", "content": result})
+        if requested:
+            break
 
     stats["seconds"] = round(time.time() - t_dm, 1)
     stats["total"] = round(time.time() - t_turn, 1)
@@ -304,6 +317,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
         entry["tools"] = trace
     if rolls:
         entry["rolls"] = rolls
+    if requested:
+        entry["roll_request"] = requested
     if supersedes:
         entry["supersedes"] = supersedes
     if info.get("injected"):
@@ -313,8 +328,11 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     rt.spawn(rt.run_track(c))
 
 
-def stream_turn(rt: Runtime, c: Campaign, supersedes: list[int] | None = None) -> StreamingResponse:
+def stream_turn(rt: Runtime, c: Campaign, supersedes: list[int] | None = None,
+                first: dict | None = None) -> StreamingResponse:
     async def gen():
+        if first:
+            yield sse(first)
         rt.turns[c.slug] = rt.turns.get(c.slug, 0) + 1
         try:
             async for chunk in play_turn(rt, c, supersedes or []):
@@ -365,6 +383,10 @@ class NewPortrait(BaseModel):
 
 class ChoosePortrait(BaseModel):
     name: str
+
+
+class RollIn(BaseModel):
+    id: str
 
 
 class PremiseAsk(BaseModel):
@@ -642,6 +664,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(400, "no player message to edit")
         if replied(msgs) and not can_rewind(c):
             raise HTTPException(403, NO_REWIND)
+        if last_user.get("roll") and not can_rewind(c):
+            raise HTTPException(403, "Dice rolls stand: the roll can't be edited.")
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
         sheet.rewind(c, last_user["id"])
@@ -664,6 +688,21 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             saved = sheet.save(c, body, msgs[-1]["id"] if msgs else 0, "edited by the player")
         return {"sheet": saved}
 
+    @app.post("/api/campaigns/{slug}/roll")
+    async def player_roll(slug: str, body: RollIn):
+        """The player clicks the on-screen dice for the GM's pending request. The server rolls
+        (so it's fair), records the roll as the player's turn, and the GM narrates it."""
+        rt = R()
+        rt.require_configured()
+        c = rt.campaign(slug)
+        msgs = c.messages()
+        req = msgs[-1].get("roll_request") if msgs and msgs[-1]["role"] == "assistant" else None
+        if not req or req["id"] != body.id:
+            raise HTTPException(409, "That roll isn't waiting any more.")
+        r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"))
+        entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})
+        return stream_turn(rt, c, first={"type": "rolled", "roll": r, "message": entry})
+
     @app.post("/api/campaigns/{slug}/unsend")
     async def unsend(slug: str):
         """Withdraw the player's last message (and any reply to it), e.g. sent by mistake.
@@ -677,6 +716,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(400, "nothing to unsend")
         if replied(msgs) and not can_rewind(c):
             raise HTTPException(409, "Too late: the GM had already replied.")
+        if last_user.get("roll") and not can_rewind(c):
+            raise HTTPException(409, "Dice rolls stand: the roll can't be taken back.")
         dead = [m["id"] for m in msgs if m["id"] >= last_user["id"]]
         router.undo_scenes_from(c, last_user["id"])
         sheet.rewind(c, last_user["id"])

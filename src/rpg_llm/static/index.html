@@ -192,6 +192,35 @@ label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 .roll { font: 13px/1.4 system-ui, sans-serif; padding: 5px 10px; border-radius: 8px;
   background: var(--bg); border: 1px solid var(--line); }
 .roll.ok { border-left: 3px solid #3c8d4a; } .roll.fail { border-left: 3px solid var(--warn); }
+/* on-screen dice */
+.rollreq { margin-top: 12px; padding: 12px 14px; border-radius: 12px; border: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent); font: 14px/1.4 system-ui, sans-serif; }
+.rollreq .rq-title { font-weight: 600; }
+.rollreq .rq-dice { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; }
+.rollreq.live .die { cursor: pointer; transition: transform .15s; }
+.rollreq.live .die:hover { transform: rotate(-8deg) scale(1.08); }
+.die { width: 46px; height: 46px; flex: none; }
+.die polygon, .die circle, .die rect { fill: color-mix(in srgb, var(--accent) 14%, var(--panel)); stroke: var(--accent); stroke-width: 4; }
+.die line { stroke: var(--accent); stroke-width: 2; opacity: .45; }
+.die text { fill: var(--ink); font: 700 34px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
+.dicefly { position: fixed; inset: 0; z-index: 30; pointer-events: none; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px; }
+.dicefly .row { display: flex; gap: 16px; }
+.dicefly .die { width: 92px; height: 92px; filter: drop-shadow(0 8px 16px rgba(0,0,0,.45));
+  animation: tumble 1.15s cubic-bezier(.2,.75,.3,1) both; }
+@keyframes tumble { 0% { transform: translate(-55vw, 32vh) rotate(-900deg) scale(.45); }
+  72% { transform: translate(10px, -8px) rotate(24deg) scale(1.08); } 100% { transform: none; } }
+.dicefly .banner { font: 700 26px system-ui, sans-serif; padding: 8px 18px; border-radius: 12px;
+  background: var(--panel); color: var(--ink); box-shadow: 0 6px 24px rgba(0,0,0,.35); opacity: 0;
+  transition: opacity .25s; }
+.dicefly .banner.show { opacity: 1; }
+.dicefly .banner.ok { color: #2f8a45; } .dicefly .banner.fail { color: var(--warn); }
+.dicefly.fade { transition: opacity .5s; opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .dicefly .die { animation: none; } }
+.rolled { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 14px/1.4 system-ui, sans-serif; }
+.rolled .die { width: 32px; height: 32px; }
+.rolled .die text { font-size: 38px; }
+.rolled .res.ok { color: #2f8a45; font-weight: 600; } .rolled .res.fail { color: var(--warn); font-weight: 600; }
 .histnav { display: inline-flex; gap: 6px; align-items: center; }
 .portraitbox { display: flex; gap: 14px; align-items: flex-start; }
 .portraitbox > div:last-child { flex: 1; min-width: 0; }
@@ -422,6 +451,7 @@ function openNewCampaign() {
         <option value="brutal">Brutal: failure, loss and death when earned</option></select></div>
       <div><label>Dice</label><select id="nDice">
         <option value="auto" selected>Rolled for me, shown in the story</option>
+        <option value="virtual">I roll dice on screen</option>
         <option value="manual">I roll my own dice</option>
         <option value="none">No dice: pure narrative</option></select></div>
     </div>
@@ -618,7 +648,51 @@ function rollHTML(r) {
 }
 function rollsHTML(rolls) { return rolls?.length ? `<div class="rolls">${rolls.map(rollHTML).join("")}</div>` : ""; }
 
+// ---- dice shapes ------------------------------------------------------------
+const DIE_SHAPES = {
+  4: '<polygon points="50,6 95,88 5,88"/>',
+  6: '<rect x="8" y="8" width="84" height="84" rx="14"/>',
+  8: '<polygon points="50,4 95,50 50,96 5,50"/><line x1="5" y1="50" x2="95" y2="50"/>',
+  10: '<polygon points="50,4 93,40 50,96 7,40"/><line x1="7" y1="40" x2="93" y2="40"/>',
+  12: '<polygon points="50,4 95,37 78,93 22,93 5,37"/>',
+  20: '<polygon points="50,3 93,27 93,73 50,97 7,73 7,27"/><polygon points="50,22 76,66 24,66" fill="none"/>',
+};
+function dieSVG(sides, value) {
+  const shape = DIE_SHAPES[sides] || '<circle cx="50" cy="50" r="44"/>';
+  const label = value ?? (sides === 100 ? "%" : "?");
+  return `<svg class="die" viewBox="0 0 100 100" data-sides="${sides}">${shape}<text x="50" y="${sides === 4 ? 62 : 52}">${label}</text></svg>`;
+}
+function parseDice(notation) {
+  const m = /^(\d*)D(\d+)([+-]\d+)?$/i.exec(notation || "");
+  return m ? { count: +(m[1] || 1), sides: +m[2], mod: +(m[3] || 0) } : { count: 1, sides: 20, mod: 0 };
+}
+function needText(r) {
+  return "target" in r ? `need ${r.target}${r.success_if === "at_most" ? " or less" : "+"}` : "";
+}
+function rollRequestHTML(req, live) {
+  const d = parseDice(req.dice);
+  const shown = Math.min(d.count, 6);
+  return `<div class="rollreq ${live ? "live" : ""}" data-roll="${esc(req.id)}">
+    <div class="rq-title">🎲 ${esc(req.prompt)}</div>
+    <div class="muted">${esc(req.dice)}${needText(req) ? " · " + needText(req) : ""}${live ? "" : " · rolled"}</div>
+    <div class="rq-dice">${Array.from({ length: shown }, () => dieSVG(d.sides)).join("")}${d.count > shown ? `<span class="muted">+${d.count - shown} more</span>` : ""}
+      ${live ? `<button class="primary" data-act="roll">🎲 Roll</button>` : ""}</div>
+  </div>`;
+}
+function rolledHTML(r) {
+  const d = parseDice(r.dice);
+  const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
+  const res = "success" in r ? `<span class="res ${r.success ? "ok" : "fail"}">${r.success ? "✓ success" : "✗ failure"}</span>` : "";
+  return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${r.rolls.map(v => dieSVG(d.sides, v)).join("")}${mod} = <strong>${r.total}</strong> ${needText(r) ? `<span class="muted">(${needText(r)})</span>` : ""} ${res}</div>`;
+}
+
 function msgHTML(m, isLastUser, isLastGm) {
+  if (m.role === "user" && m.roll) {
+    const bubble = `<div class="msg user" data-id="${m.id}">${rolledHTML(m.roll)}</div>`;
+    return S.data.portrait
+      ? `<div class="urow">${bubble}<img class="avatar" alt="" src="/api/campaigns/${S.slug}/portraits/${S.data.portrait}"></div>`
+      : bubble;
+  }
   if (m.role === "user") {
     const unanswered = S.data.messages[S.data.messages.length - 1] === m;
     const btns = [];
@@ -648,6 +722,7 @@ function msgHTML(m, isLastUser, isLastGm) {
     ${m.reasoning ? `<details class="think"><summary>thinking</summary><div>${esc(m.reasoning)}</div></details>` : ""}
     ${rollsHTML(m.rolls)}
     <div class="body">${md(m.content)}</div>
+    ${m.roll_request ? rollRequestHTML(m.roll_request, isLastGm && !S.busy) : ""}
     <div class="meta">${chips.join("")}${isLastGm && !S.busy && (!m.content.trim() || S.data.can_rewind) ? `<span class="actions"><button data-act="regen" title="${m.content.trim() ? "Rewind: ask the GM again for this turn" : "Retry this turn"}">↻ ${m.content.trim() ? "Re-roll" : "Retry"}</button></span>` : ""}</div>
   </div>`;
 }
@@ -712,6 +787,11 @@ function renderChat(scroll) {
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
   $("view").querySelectorAll(".avatar").forEach(a => a.onclick = openSheet);
+  $("view").querySelectorAll(".rollreq.live").forEach(card => {
+    const go = () => rollDice(card.dataset.roll);
+    card.querySelector("[data-act=roll]").onclick = go;
+    card.querySelectorAll(".die").forEach(d => d.onclick = go);
+  });
   $("view").querySelectorAll("[data-act=retry]").forEach(b => b.onclick = () => runTurn(`/api/campaigns/${S.slug}/regenerate`, null, null, "regenerate"));
   $("view").querySelectorAll("[data-act=edit]").forEach(b => b.onclick = () => editLast(lastUser));
   if (scroll) $("main").scrollTop = $("main").scrollHeight;
@@ -729,7 +809,7 @@ function setBusy(b) {
 async function cancelTurn() {
   if (!S.busy || !S.abort) return;
   const turn = S.turn;
-  if (turn.kind !== "regenerate") {
+  if (turn.kind !== "regenerate" && turn.kind !== "roll") {
     S.cancelling = (async () => {
       try {
         const r = await api(`/api/campaigns/${S.slug}/unsend`, { method: "POST" });
@@ -741,7 +821,7 @@ async function cancelTurn() {
   S.abort.abort();
 }
 
-async function runTurn(path, body, optimisticUser, kind = "chat") {
+async function runTurn(path, body, optimisticUser, kind = "chat", extra = {}) {
   if (S.busy) return;
   setBusy(true);
   S.abort = new AbortController();
@@ -776,6 +856,7 @@ async function runTurn(path, body, optimisticUser, kind = "chat") {
       roll: (e) => { const rb = box.querySelector(".rolls"); rb.classList.remove("hidden"); rb.insertAdjacentHTML("beforeend", rollHTML(e)); },
       error: (e) => { throw new Error(e.text); },
       done: () => {},
+      ...extra,
     }, S.abort.signal);
   } catch (err) {
     if (err.name !== "AbortError") $("statusline").innerHTML = `<span class="error">Error: ${esc(err.message)}</span>`;
@@ -805,6 +886,39 @@ function send() {
   }
   runTurn(`/api/campaigns/${S.slug}/chat`, { content: text }, text);
 }
+// ---- the player rolls the GM's requested dice ------------------------------------------
+function rollDice(id) {
+  if (S.busy) return;
+  const last = S.data.messages[S.data.messages.length - 1];
+  const req = last?.roll_request;
+  if (!req || req.id !== id) return;
+  const d = parseDice(req.dice);
+  const shown = Math.min(d.count, 6);
+  const fly = document.createElement("div");
+  fly.className = "dicefly";
+  fly.innerHTML = `<div class="row">${Array.from({ length: shown }, (_, i) => dieSVG(d.sides).replace('class="die"', `class="die" style="animation-delay:${i * 90}ms"`)).join("")}</div><div class="banner"></div>`;
+  document.body.appendChild(fly);
+  const faces = [...fly.querySelectorAll(".die text")];
+  const flicker = setInterval(() => faces.forEach(t => t.textContent = 1 + Math.floor(Math.random() * d.sides)), 70);
+  const t0 = Date.now();
+  let settled = false;
+  const land = (r) => {
+    if (settled) return; settled = true;
+    setTimeout(() => {
+      clearInterval(flicker);
+      faces.forEach((t, i) => t.textContent = r.rolls[i] ?? "");
+      const banner = fly.querySelector(".banner");
+      const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
+      banner.textContent = `${r.rolls.length > 1 || r.modifier ? r.rolls.join(" + ") + mod + " = " : ""}${r.total}` +
+        ("success" in r ? (r.success ? "  ✓ success" : "  ✗ failure") : "");
+      banner.classList.add("show", ...("success" in r ? [r.success ? "ok" : "fail"] : []));
+      setTimeout(() => { fly.classList.add("fade"); setTimeout(() => fly.remove(), 600); }, 1800);
+    }, Math.max(0, 1250 - (Date.now() - t0)));
+  };
+  runTurn(`/api/campaigns/${S.slug}/roll`, { id }, `🎲 ${req.prompt}…`, "roll", { rolled: (e) => land(e.roll) })
+    .finally(() => { if (!settled) { clearInterval(flicker); fly.remove(); } });
+}
+
 function regenerate() {
   S.data.messages = S.data.messages.slice(0, -1);
   runTurn(`/api/campaigns/${S.slug}/regenerate`, null, null, "regenerate");

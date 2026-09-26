@@ -461,7 +461,7 @@ async function loadCampaigns() {
         <div class="row"><div><label>Consequences</label><select data-f="consequences">
             ${[["low", "Low-stakes"], ["normal", "Normal"], ["brutal", "Brutal"]].map(([v, t]) => `<option value="${v}" ${c.consequences === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
           <div><label>Dice</label><select data-f="dice">
-            ${[["auto", "Rolled by the app, shown"], ["manual", "Player rolls"], ["none", "No dice"]].map(([v, t]) => `<option value="${v}" ${c.dice === v ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
+            ${[["auto", "Rolled by the app, shown"], ["virtual", "Player rolls on screen"], ["manual", "Player rolls own dice"], ["none", "No dice"]].map(([v, t]) => `<option value="${v}" ${c.dice === v ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
         <div class="row"><div><label>Writing style</label><select data-f="style">
             ${[["plain", "Plain: practical, matter-of-fact"], ["atmospheric", "Atmospheric: vivid, moody"], ["lighthearted", "Lighthearted: real stakes, lots of humour"], ["comedic", "Comedic: played for laughs"]].map(([v, t]) => `<option value="${v}" ${c.style === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
           <div><label>Reply length</label><select data-f="length">

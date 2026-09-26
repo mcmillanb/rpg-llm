@@ -92,6 +92,18 @@ routine actions. The player sees every roll.""",
     "manual": """Dice: the player rolls their own dice. When an outcome is uncertain and matters, tell the player
 what to roll and what they need (for example "Roll 2D6+1: you need 8 or more"), then stop and
 wait for their result before narrating what happens. Never roll for them or assume a result.""",
+    "virtual": """\
+Dice: the player rolls on-screen dice. When the outcome of an action is genuinely uncertain and
+matters, describe the set-up in a sentence or two (what they attempt, what's at stake), then call
+the request_roll tool with dice that fit the game (2D6 for Traveller-style checks, d20 for d20
+systems, d100 for percentile systems), a short instruction for the player ("Roll to attack the
+goblin", "Strength check to lift the rock") and the target, and stop there: don't narrate the
+outcome, the player's roll comes next. The player can't add anything to the roll, so work out a
+fair modifier from the character's skills and the situation and put it in the dice (for example
+d20+5 for a trained fighter's attack, 2D6+2 for a skilled pilot's 8+ check); never ask the player
+to add a bonus themselves. Most systems roll high against a target (success_if "at_least");
+use "at_most" only for roll-under systems such as Call of Cthulhu's percentile skills. When the roll arrives, narrate what it achieved. Don't ask
+for rolls on routine actions.""",
     "none": """Dice: this game uses no dice. Decide outcomes from the fiction, the character's abilities and
 the stakes, fairly and without favouring the player.""",
 }

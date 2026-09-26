@@ -11,7 +11,7 @@ from rpg_llm.vault import Campaign, State, estimate_tokens
 
 
 CONSEQUENCES = ("brutal", "normal", "low")
-DICE_MODES = ("auto", "manual", "none")
+DICE_MODES = ("auto", "virtual", "manual", "none")
 STYLES = ("plain", "atmospheric", "lighthearted", "comedic")
 LENGTHS = ("short", "medium", "long")
 

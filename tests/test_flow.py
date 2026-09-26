@@ -746,3 +746,53 @@ def test_tone_comes_from_the_system_picker_and_can_be_overridden(vault):
     assert "Tone and feel: Whimsical and light." in context.system_prompt(c, c.load_state())
     other = vault.create("Homebrew", system="My own world")
     assert "Tone and feel" not in context.system_prompt(other, other.load_state())
+
+
+
+# ---- on-screen dice ---------------------------------------------------------
+
+def test_virtual_dice_request_roll_then_narrate(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[
+        [{"content": "The goblin lunges. "},
+         {"tool_calls": [{"id": "1", "name": "request_roll",
+                          "arguments": '{"dice": "d20+3", "prompt": "Roll to attack the goblin", "target": 13}'}]}],
+        [{"content": "Your blade finds its mark."}],
+    ])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "dice": "virtual"}).json()["slug"]
+        events = sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "I attack"}))
+        req = next(e for e in events if e["type"] == "roll_request")
+        assert req["dice"] == "1D20+3" and req["target"] == 13
+        assert len(dm.calls) == 1  # the turn ended at the request: no outcome narrated
+        gm = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]
+        assert gm["content"] == "The goblin lunges." and gm["roll_request"]["id"] == req["id"]
+        assert any(t["function"]["name"] == "request_roll" for t in dm.calls[0][2]["tools"])
+
+        events = sse_events(client.post(f"/api/campaigns/{slug}/roll", json={"id": req["id"]}))
+        rolled = events[0]
+        assert rolled["type"] == "rolled" and 4 <= rolled["roll"]["total"] <= 23
+        assert dm.calls[1][1][-1]["content"].startswith("🎲 Roll to attack the goblin: 1D20+3")
+        msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
+        assert msgs[-2]["roll"]["total"] == rolled["roll"]["total"]
+        assert msgs[-1]["content"] == "Your blade finds its mark."
+        # the request is used up, and a roll can't be taken back or edited
+        assert client.post(f"/api/campaigns/{slug}/roll", json={"id": req["id"]}).status_code == 409
+
+
+def test_a_roll_cannot_be_unsent_or_edited_without_rewinds(vault, tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()), dm=FakeLLM(), router_llm=FakeLLM(),
+                 archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "dice": "virtual"}).json()["slug"]
+        rt.vault.get(slug).append({"role": "user", "content": "🎲 roll", "roll": {"total": 2}})
+        assert client.post(f"/api/campaigns/{slug}/unsend").status_code == 409
+        assert client.post(f"/api/campaigns/{slug}/edit", json={"content": "x"}).status_code == 403
+
+
+def test_roll_under_only_for_roll_under_systems():
+    from rpg_llm import dice
+    args = {"dice": "2D6", "prompt": "Pilot check", "target": 8, "success_if": "at_most"}
+    assert dice.request(args, dice.roll_under_system("Traveller (Third Imperium)"))["success_if"] == "at_least"
+    assert dice.request(args, dice.roll_under_system("Call of Cthulhu (7th Edition)"))["success_if"] == "at_most"
