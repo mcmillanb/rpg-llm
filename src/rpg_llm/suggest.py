@@ -2,12 +2,15 @@
 starting premises."""
 
 import json
+import random
 import re
 import time
 from pathlib import Path
 
 from rpg_llm import prompts
 from rpg_llm.llm import NO_THINKING, LLMClient
+
+INITIALS = "ABCDEFGHIJKLMNOPRSTWY"
 
 SYSTEMS_SCHEMA = {
     "type": "object",
@@ -48,6 +51,9 @@ async def premise(dm: LLMClient, system: str, seed: str = "", avoid: list[str] |
     """A starting premise. `seed` is the player's own idea to build on; `avoid` holds earlier
     suggestions so "try another" gives something different."""
     seed_text = f"\nThe player's idea, to build on and keep: {seed.strip()}\n" if seed.strip() else ""
+    if not seed.strip():  # models reuse a few names (Vane, Voss, Kaelen...): pick initials for it
+        first, last = random.choice(INITIALS), random.choice(INITIALS)
+        seed_text += f"\nName the character with the initials {first}. {last}. (a name that fits the setting).\n"
     avoid = [a for a in (avoid or []) if a.strip()][-4:]
     avoid_text = ("\nAlready suggested (write something clearly different: another character, "
                   "place and hook):\n" + "\n".join(f"- {a[:300]}" for a in avoid) + "\n") if avoid else ""

@@ -261,11 +261,18 @@ Write the opening premise for a solo tabletop RPG campaign.
 Game system / setting: {system}
 {tone}{seed}{avoid}
 Cover, in 120-180 words of plain prose (no headings, no lists):
-- the player character: a name, who they are, one thing they are good at, one thing weighing on
-  them
+- the player character: the kind of protagonist this game is built around (a D&D adventurer
+  with a class such as fighter, wizard, rogue or cleric; a Call of Cthulhu investigator; a
+  Traveller with a career such as scout, merchant or ex-navy; a Shadowrun runner; and so on,
+  unless the player's own idea says otherwise): a name, their role or class, one thing they are
+  good at, and a goal or complication that drives them
 - where and how the story opens, grounded in the setting's feel
 - an immediate hook or problem that pulls them into the adventure
 
+Match the game's usual mood and genre, not a generic dark or mysterious one: heroic adventure
+for D&D, trade, travel and hard choices for Traveller, swashbuckling for Star Wars, street-level
+grit for cyberpunk, creeping dread only for horror games.
+Avoid stock backstories such as a mentor they failed to save.
 Leave room for the player: don't decide what they do next. Write only the premise."""
 
 SHEET_TASK = """\
@@ -379,7 +386,9 @@ Premise:
 {appearance}{avoid}
 Return JSON:
 - appearance: 1-2 sentences on how the character looks: apparent age, build, face, hair,
-  clothing and one distinctive detail. Keep to anything the premise says; invent the rest to fit.
+  clothing and gear that show their role in the game (armour and a weapon, robes and a focus, a
+  flight jacket...) and one distinctive detail. Keep to anything the premise says; invent the
+  rest to fit.
 - prompt: an image prompt of 40-70 words for a head-and-shoulders portrait: the appearance,
   expression and pose, plus a hint of a background from their world. Visual description only:
   no names, no story, no text in the image."""
