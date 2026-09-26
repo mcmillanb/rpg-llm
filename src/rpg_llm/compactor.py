@@ -223,3 +223,29 @@ def reset_wiki(campaign: Campaign) -> None:
         if s.status == "compacted":
             s.status, s.note = "closed_provisional", None
     campaign.save_state(state)
+
+
+async def refold(campaign: Campaign, archiver: LLMClient, lock: asyncio.Lock) -> str | None:
+    """Rewrite an existing condensed summary with the current prompt (e.g. to add the cast list),
+    from the old summary plus the transcript it covers. The covered range doesn't change."""
+    state = campaign.load_state()
+    if not state.fold:
+        return None
+    covered = [m for m in campaign.messages()
+               if state.live_start() <= m["id"] <= state.fold["until"]]
+    msg = await archiver.chat(
+        [{"role": "system", "content": prompts.ARCHIVE_SYSTEM},
+         {"role": "user", "content": prompts.FOLD_TASK.format(
+             previous=f"\nThe previous summary of this stretch (keep its facts, fix its gaps):\n"
+                      f"{state.fold['summary']}\n",
+             transcript=wiki.format_transcript(covered, limit_chars=await transcript_limit(archiver)))}],
+        max_tokens=2500, temperature=0.3, extra_body=NO_THINKING)
+    summary = re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).strip()
+    if len(summary) < 200:
+        return None
+    async with lock:
+        fresh = campaign.load_state()
+        if fresh.fold and fresh.fold["until"] == state.fold["until"]:
+            fresh.fold = {**fresh.fold, "summary": summary}
+            campaign.save_state(fresh)
+    return summary

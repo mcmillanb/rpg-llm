@@ -305,6 +305,19 @@ async def test_fold_condenses_oldest_live_messages_and_survives_scene_change(vau
     assert c.load_state().fold is not None
 
 
+async def test_refold_rewrites_the_summary_with_a_cast_list(vault):
+    c = vault.create("Test")
+    play(c, *[(f"u{i} " + "x" * 300, f"g{i} a man named Kess " + "y" * 300) for i in range(6)])
+    await compactor.fold_current_scene(c, FakeLLM(chat_reply="Old summary."), keep_tokens=250,
+                                       lock=asyncio.Lock())
+    until = c.load_state().fold["until"]
+    archiver = FakeLLM(chat_reply="Cast:\n- Kess (he): broker\n\n" + "z" * 300)
+    assert await compactor.refold(c, archiver, asyncio.Lock())
+    fold = c.load_state().fold
+    assert fold["until"] == until and fold["summary"].startswith("Cast:\n- Kess (he)")
+    assert "Old summary." in archiver.calls[-1][1][-1]["content"]
+
+
 def test_dialogue_is_not_movement_evidence():
     reply = ('Serevane stands. "Forty minutes. The *Kestrel.* Not the bay. The *hull.*" '
              'She walks out.')

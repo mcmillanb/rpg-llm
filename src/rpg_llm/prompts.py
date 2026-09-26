@@ -8,7 +8,8 @@ How to run the game:
   person. End at a point where the player can act.
 - Never decide the player character's actions, words, or feelings for them.
 - Keep continuity with established facts. The campaign brief below and the campaign wiki are
-  canon.
+  canon. Keep every character's name, gender, pronouns and role consistent with how they were
+  introduced (check the notes and the condensed summary).
 - Stay in character as the GM. Out-of-character questions from the player (in brackets or
   prefixed with "OOC") get brief out-of-character answers.
 
@@ -246,7 +247,8 @@ ARCHIVE_SYSTEM = """\
 You are the archivist for a solo role-playing campaign. You turn play transcripts into a
 concise campaign wiki, like an Obsidian vault. Write in past tense, third person, plainly and
 factually: who, what, where, outcomes, promises, debts, clues, and open threads. Keep proper
-names exactly as they appear. Never invent facts that are not in the transcript."""
+names exactly as they appear, and keep every person's gender and pronouns exactly as the
+transcript uses them. Never invent facts that are not in the transcript."""
 
 ARCHIVE_SCENE_TASK = """\
 Campaign: {campaign}
@@ -281,6 +283,9 @@ fullest known name as "name" and put shorter forms ("Brandt") in aliases. For a 
 it specifically enough to be unique ("Ruie Highport Bar", not "Highport Bar"). If an existing
 wiki entry above is the same person, place or thing, reuse its exact name.
 
+For a person, "current_state" starts with their pronouns in brackets, e.g. "(he) Freight broker
+at Harlow South who...".
+
 "visit" is what happened with that entity in THIS scene (1-3 sentences). "current_state" is a
 short up-to-date description of the entity overall, merging the existing entry's state with what
 changed. "aliases" are only distinctive alternative names or titles (never generic words like
@@ -303,9 +308,15 @@ Newly filed scenes (oldest first):
 Return only the new brief in markdown, starting with "# {campaign}"."""
 
 FOLD_TASK = """\
-The current scene has grown too long for the game master's memory. Summarise the transcript
-below (the earlier part of the current scene) in 2-4 paragraphs, keeping every fact the game
-master will need to continue: names, what was said and agreed, positions, injuries, items.
+The current stretch of play has grown too long for the game master's memory. Summarise the
+transcript below (the earlier part) so the game master can carry on without it.
+
+Start with "Cast:": one line per named person (and named ship or AI), with their pronouns or
+gender exactly as the transcript uses them, and their role, e.g. "- Kess (he): freight broker at
+Harlow South". Then 2-4 paragraphs keeping every fact the game master will need: what was said,
+agreed and paid, where things are, injuries, items, open threads.
+
+Write it as a clean record: no questions, no notes to yourself, no working-out.
 {previous}
 Transcript:
 {transcript}"""
