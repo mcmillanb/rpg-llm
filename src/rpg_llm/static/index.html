@@ -113,6 +113,16 @@ body[data-mode="dark"] { --wash: rgba(21,23,26,.86); --chrome-home: rgba(24,26,3
   rgba(0,0,0,.42) 50%, rgba(0,0,0,.3) 86%, rgba(0,0,0,0)); }
 @media (max-width: 900px) { .backdrop-shade { background: rgba(0,0,0,.42); } }
 @media (prefers-reduced-motion: reduce) { .backdrop { transition: none; } }
+/* art view: the painting on its own, messages faded away */
+main, #input, #send, #statusline, header > *:not(#title), .backdrop-shade { transition: opacity .45s ease; }
+body[data-viewart] main, body[data-viewart] #input, body[data-viewart] #send,
+body[data-viewart] header > *:not(#title), body[data-viewart] .backdrop-shade { opacity: 0; pointer-events: none; }
+body[data-look][data-viewart] header, body[data-look][data-viewart] footer {
+  background: transparent; backdrop-filter: none; border-color: transparent; }
+body[data-viewart] #title, body[data-viewart] #statusline { text-shadow: 0 1px 4px rgba(0,0,0,.8); color: #f2efe8; }
+body[data-viewart] .backdrop { filter: none; }
+#artBtn { font-size: 16px; padding: 6px 10px; }
+body[data-viewart] #artBtn { background: rgba(0,0,0,.45); color: #fff; border-color: rgba(255,255,255,.35); }
 body[data-look] .backdrop, body[data-look] .backdrop-shade { display: block; }
 body[data-look] { background: #000; }
 body[data-look] #app { position: relative; z-index: 1; }
@@ -258,6 +268,7 @@ label.check input { width: auto; }
       <div id="statusline" class="ui muted"></div>
       <div class="composer">
         <textarea id="input" rows="1" placeholder="What do you do?  (Esc stops a reply and takes your message back · ↑ edits your last message)"></textarea>
+        <button id="artBtn" class="hidden" title="View the artwork (click again, or Esc, to bring the messages back)" aria-label="View the artwork">👁</button>
         <button id="send" class="primary">Send</button>
       </div>
     </div>
@@ -355,6 +366,7 @@ async function showList() {
   history.replaceState(null, "", "/");
   $("title").textContent = "Campaigns";
   ["back", "archiveBtn", "sheetBtn", "footer"].forEach(id => $(id).classList.add("hidden"));
+  toggleArt(false);
   setLook(null);
   document.body.dataset.page = "list";
   $("newBtn").classList.remove("hidden");
@@ -733,8 +745,10 @@ let LOOK = { theme: null, url: null, front: "bdA" };
 function setLook(theme) {
   const themed = theme && S.data?.themes?.[theme];
   if (!themed) { delete document.body.dataset.look; LOOK = { theme: null, url: null, front: "bdA" };
+    $("artBtn").classList.add("hidden"); delete document.body.dataset.viewart;
     ["bdA", "bdB"].forEach(id => { $(id).classList.remove("on"); $(id).style.backgroundImage = ""; }); return; }
   document.body.dataset.look = theme;
+  $("artBtn").classList.remove("hidden");
   if (FONTS[theme] && !document.getElementById("font-" + theme)) {
     const l = document.createElement("link"); l.id = "font-" + theme; l.rel = "stylesheet";
     l.href = `https://fonts.googleapis.com/css2?family=${FONTS[theme]}&display=swap`;
@@ -1078,7 +1092,13 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); send(); }
   else if (e.key === "ArrowUp" && !$("input").value && !S.busy && S.slug) { e.preventDefault(); startEditing(); }
 });
+function toggleArt(on = !document.body.dataset.viewart) {
+  if (on) document.body.dataset.viewart = "1"; else delete document.body.dataset.viewart;
+  $("artBtn").title = on ? "Bring the messages back (Esc)" : "View the artwork (click again, or Esc, to bring the messages back)";
+}
+$("artBtn").onclick = () => toggleArt();
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.body.dataset.viewart) { e.preventDefault(); toggleArt(false); return; }
   if (e.key !== "Escape" || !S.slug) return;
   if (S.busy) { e.preventDefault(); cancelTurn(); }
   else if (S.editing) { e.preventDefault(); $("input").value = ""; autosize(); stopEditing(); }
