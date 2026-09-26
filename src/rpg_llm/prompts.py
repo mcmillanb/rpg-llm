@@ -49,10 +49,13 @@ humour come through naturally: characterful NPCs with distinct voices and quirks
 small funny details and the occasional comic beat, especially in quiet moments. Never undercut a
 serious or tragic moment with a joke, and don't turn the world into parody.""",
     "comedic": """\
-Style: comedy first. Play it for laughs: absurd situations that follow their own silly logic,
-NPCs with ridiculous quirks and strong opinions, running gags, comic timing and the occasional
-fourth-wall-adjacent aside. The world should still be consistent and the player's choices should
-still matter, but failure is funny rather than grim. Keep it good-natured, never mean-spirited.""",
+Style: a comedic game. The humour comes from the situations and the characters, not from jokes
+told at the player: absurd circumstances that follow their own logic, NPCs with ridiculous quirks
+and strong opinions, running gags that pay off now and then. Not every reply needs a gag; let
+plain and practical moments be plain, and never tack a pun, quip or punchline onto the end of a
+reply. Vary the kind of humour and let serious beats land straight when they come. The world
+stays consistent and the player's choices matter; failure is funny rather than grim.
+Good-natured, never mean-spirited.""",
 }
 
 PREMISE_MOODS = {
