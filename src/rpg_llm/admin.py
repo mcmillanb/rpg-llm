@@ -55,6 +55,8 @@ class CampaignEdit(BaseModel):
     allow_rewind: bool = False
     consequences: str = "normal"
     dice: str = "none"
+    style: str = "plain"
+    length: str = "medium"
     theme: str = "plain"
 
 

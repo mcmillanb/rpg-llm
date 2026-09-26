@@ -504,10 +504,14 @@ def test_dice_roll_and_description():
 
 def test_table_settings_reach_the_prompt_and_old_campaigns_get_no_dice(vault):
     c = vault.create("Old")
-    assert context.table(c.meta) == {"consequences": "normal", "dice": "none"}
-    c.save_meta({**c.meta, "consequences": "brutal", "dice": "auto"})
+    assert context.table(c.meta) == {"consequences": "normal", "dice": "none",
+                                     "style": "plain", "length": "medium"}
+    assert "matter-of-fact" in context.system_prompt(c, c.load_state())
+    c.save_meta({**c.meta, "consequences": "brutal", "dice": "auto", "style": "atmospheric",
+                 "length": "short"})
     sp = context.system_prompt(c, c.load_state())
     assert "BRUTAL" in sp and "roll_dice" in sp
+    assert "atmospheric" in sp and "100-150 words" in sp and "matter-of-fact" not in sp
 
 
 def test_auto_dice_turn_rolls_real_dice_and_records_them(tmp_path):
@@ -629,11 +633,11 @@ def test_sheet_guard_keeps_known_money_and_caps_lists():
 
 
 async def test_long_tail_is_condensed_in_the_background_after_a_reply(tmp_path):
-    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(live_tail_pct=5))),
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(live_tail_pct=10))),
                  dm=FakeLLM(), router_llm=FakeLLM([verdict(False, 0.9)]),
                  archiver=FakeLLM(chat_reply="Condensed."))
     c = rt.vault.create("T")
-    play(c, *[(f"u{i} " + "x" * 400, f"g{i} " + "y" * 400) for i in range(8)])  # >80% of 5% of 32k
+    play(c, *[(f"u{i} " + "x" * 800, f"g{i} " + "y" * 800) for i in range(8)])  # >80% of 10% of 32k
     await rt.run_track(c)
     state = c.load_state()
     assert state.fold and state.fold["summary"] == "Condensed."

@@ -12,15 +12,18 @@ from rpg_llm.vault import Campaign, State, estimate_tokens
 
 CONSEQUENCES = ("brutal", "normal", "low")
 DICE_MODES = ("auto", "manual", "none")
+STYLES = ("plain", "atmospheric")
+LENGTHS = ("short", "medium", "long")
 
 
 def table(meta: dict) -> dict:
     """A campaign's table settings with defaults. Campaigns from before dice existed default to
     no dice, so an ongoing story doesn't suddenly start rolling."""
-    c = meta.get("consequences")
-    d = meta.get("dice")
+    c, d, st, ln = (meta.get(k) for k in ("consequences", "dice", "style", "length"))
     return {"consequences": c if c in CONSEQUENCES else "normal",
-            "dice": d if d in DICE_MODES else "none"}
+            "dice": d if d in DICE_MODES else "none",
+            "style": st if st in STYLES else "plain",
+            "length": ln if ln in LENGTHS else "medium"}
 
 
 def system_prompt(campaign: Campaign, state: State) -> str:
@@ -37,7 +40,8 @@ def system_prompt(campaign: Campaign, state: State) -> str:
     text = prompts.DM_SYSTEM.format(
         system_line=system_line,
         extra=f"\nAdditional instructions from the player:\n{extra}\n" if extra else "",
-        table_rules=prompts.CONSEQUENCES[t["consequences"]] + "\n\n" + prompts.DICE[t["dice"]],
+        table_rules="\n\n".join([prompts.STYLES[t["style"]] + " " + prompts.LENGTHS[t["length"]],
+                                  prompts.CONSEQUENCES[t["consequences"]], prompts.DICE[t["dice"]]]),
         brief=campaign.brief.strip() or "(nothing yet)",
         arc=(f"\n# Story arc (GM only: guidance, not a script; never reveal it)\n\n{arc}\n"
              if arc else ""),

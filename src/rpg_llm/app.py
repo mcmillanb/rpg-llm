@@ -341,6 +341,8 @@ class NewCampaign(BaseModel):
     allow_rewind: bool = False
     consequences: str = "normal"
     dice: str = "auto"
+    style: str = "plain"
+    length: str = "medium"
     theme: str = "auto"  # "auto" picks from the system and genre
     genre: str = ""
     portrait: str = ""  # token of a portrait made during setup
@@ -441,7 +443,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns")
     async def create_campaign(body: NewCampaign):
         c = R().vault.create(body.name, body.premise, body.system, body.dm_instructions)
-        t = context.table({"consequences": body.consequences, "dice": body.dice})
+        t = context.table({"consequences": body.consequences, "dice": body.dice,
+                           "style": body.style, "length": body.length})
         theme = body.theme if body.theme in themes.THEMES or body.theme == themes.PLAIN \
             else themes.default_for(body.system, body.genre)
         tone = body.tone.strip() or suggest.tone_for(R().vault.root, body.system)

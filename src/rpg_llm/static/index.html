@@ -406,6 +406,15 @@ function openNewCampaign() {
         <option value="manual">I roll my own dice</option>
         <option value="none">No dice: pure narrative</option></select></div>
     </div>
+    <div class="two">
+      <div><label>Writing style</label><select id="nStyle">
+        <option value="plain" selected>Plain: practical, matter-of-fact</option>
+        <option value="atmospheric">Atmospheric: vivid, moody</option></select></div>
+      <div><label>Reply length</label><select id="nLength">
+        <option value="short">Short (~100–150 words)</option>
+        <option value="medium" selected>Medium (~150–250 words)</option>
+        <option value="long">Long (~250–400 words)</option></select></div>
+    </div>
     <label>Look</label><select id="nLook"><option value="auto">Match the game system</option></select>
     <label class="check"><input type="checkbox" id="nRewind"> Allow rewinds: let me edit my last move or re-roll the GM's reply after seeing it</label>
     <div class="muted small">Off keeps outcomes final, like a real table. You can always take a message back while the GM is still replying (Esc).</div>
@@ -439,6 +448,7 @@ function openNewCampaign() {
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
       name, system: chosenSystem(), premise: $("nPremise").value, dm_instructions: $("nExtra").value,
       allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value,
+      style: $("nStyle").value, length: $("nLength").value,
       theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
       portrait: PORT.at >= 0 ? PORT.history[PORT.at].token : "",
       tone: SYSTEMS.find(x => x.name === chosenSystem())?.blurb || "",
