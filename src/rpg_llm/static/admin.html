@@ -23,9 +23,12 @@
 * { box-sizing: border-box; }
 html { background: var(--bg); }
 body { background: linear-gradient(var(--wash), var(--wash)), url("/static/backdrops/home.webp") center / cover fixed;
-  --wash: rgba(246,244,239,.5); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body { --wash: rgba(21,23,26,.9); } }
-:root[data-theme="dark"] body { --wash: rgba(21,23,26,.9); }
+  --wash: rgba(246,244,239,.5); --chrome: rgba(248,244,236,.45); --chrome-line: rgba(120,100,70,.12); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body {
+  --wash: rgba(21,23,26,.9); --chrome: rgba(24,26,30,.55); --chrome-line: rgba(255,255,255,.06); } }
+:root[data-theme="dark"] body { --wash: rgba(21,23,26,.9); --chrome: rgba(24,26,30,.55); --chrome-line: rgba(255,255,255,.06); }
+header, .savebar { background: var(--chrome) !important; backdrop-filter: blur(10px) saturate(1.1);
+  border-color: var(--chrome-line) !important; }
 html, body { margin: 0; color: var(--ink);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 button, input, textarea, select { font: inherit; color: inherit; }
