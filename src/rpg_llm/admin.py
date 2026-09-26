@@ -53,6 +53,7 @@ class CampaignEdit(BaseModel):
     dm_instructions: str = ""
     tone: str = ""
     allow_rewind: bool = False
+    show_details: bool = False
     consequences: str = "normal"
     dice: str = "none"
     style: str = "plain"
@@ -283,6 +284,7 @@ def register(app: FastAPI, R) -> None:
                 "slug": c.slug, **{k: c.meta.get(k, "") for k in
                                    ("name", "system", "premise", "dm_instructions")},
                 "allow_rewind": bool(c.meta.get("allow_rewind")), **context.table(c.meta),
+                "show_details": bool(c.meta.get("show_details")),
                 "tone": c.meta.get("tone") or suggest.tone_for(rt.vault.root, c.meta.get("system") or ""),
                 "theme": c.meta.get("theme") or themes.default_for(c.meta.get("system") or ""),
                 "messages": len(c.messages()), "scenes": len(state.scenes),

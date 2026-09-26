@@ -64,6 +64,19 @@ def clean(data: dict) -> dict:
 
 
 MAX_ITEMS = 12
+MAX_ENTRY = 160
+_THINKING = re.compile(r"\b(wait|re-?read|actually|i will|i'll|let me|however|hmm|so no)\b|\?", re.I)
+
+
+def tidy_changes(changes: list) -> list[str]:
+    """Keep the change log to short notes. A small model sometimes pours its reasoning into this
+    field ('Wait, re-reading the GM...'); drop anything that reads like thinking or runs long."""
+    out = []
+    for c in changes:
+        c = " ".join(str(c).split())
+        if c and len(c) <= 120 and not _THINKING.search(c):
+            out.append(c)
+    return out[:6]
 
 
 def guard(old: dict | None, new: dict) -> dict:
@@ -72,7 +85,7 @@ def guard(old: dict | None, new: dict) -> dict:
     if old and re.search(r"\d", old.get("money", "")) and not re.search(r"\d", new.get("money", "")):
         new["money"] = old["money"]
     for k in LISTS:
-        new[k] = new[k][:MAX_ITEMS]
+        new[k] = [e if len(e) <= MAX_ENTRY else e[:MAX_ENTRY - 1] + "…" for e in new[k][:MAX_ITEMS]]
     return new
 
 
@@ -149,9 +162,10 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str) -> d
         return None
     if not new.get("name") and current is None:
         return None  # nothing usable yet
-    what = "; ".join(result.get("changes") or []) or ("created" if current is None else "updated")
+    changes = tidy_changes(result.get("changes") or [])
+    what = "; ".join(changes) or ("created" if current is None else "updated")
     save(campaign, new, messages[-1]["id"], what)
-    return {"changes": result.get("changes") or [what]}
+    return {"changes": changes or [what]}
 
 
 async def create_start(campaign: Campaign, archiver: LLMClient) -> dict | None:

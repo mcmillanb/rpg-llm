@@ -358,8 +358,9 @@ Current sheet:
 Latest exchange:
 {exchange}
 
-Return JSON: changes (list of short descriptions of what changed, empty if nothing), changed
-(bool), sheet (the full updated sheet)."""
+Return JSON: changes (a list of short notes of what changed, under 12 words each, such as
+"Paid 20 Cr for fuel"; no explanations or reasoning; empty if nothing changed), changed (bool),
+sheet (the full updated sheet)."""
 
 SHEET_START_TASK = """\
 Create the player character's starting sheet for a new solo campaign, from the premise and the

@@ -796,3 +796,13 @@ def test_roll_under_only_for_roll_under_systems():
     args = {"dice": "2D6", "prompt": "Pilot check", "target": 8, "success_if": "at_most"}
     assert dice.request(args, dice.roll_under_system("Traveller (Third Imperium)"))["success_if"] == "at_least"
     assert dice.request(args, dice.roll_under_system("Call of Cthulhu (7th Edition)"))["success_if"] == "at_most"
+
+
+def test_sheet_change_notes_drop_leaked_reasoning():
+    from rpg_llm import sheet
+    notes = ["Paid 20 Cr for fuel", "Added burn on right hand",
+             "Updated reactors: Wait, re-reading GM: 'Seven of eight'. I will leave it.",
+             "x" * 300, "Is this a change?"]
+    assert sheet.tidy_changes(notes) == ["Paid 20 Cr for fuel", "Added burn on right hand"]
+    g = sheet.guard(None, {**sheet.blank(), "assets": ["y" * 400]})
+    assert len(g["assets"][0]) == sheet.MAX_ENTRY and g["assets"][0].endswith("…")

@@ -596,6 +596,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
                 "table": context.table(c.meta),
                 "portrait": portrait.current(c),
+                "show_details": bool(c.meta.get("show_details")),
                 "images": rt.settings.app.images.enabled,
                 "theme": c.meta.get("theme") or themes.default_for(c.meta.get("system") or ""),
                 "themes": themes.public(),

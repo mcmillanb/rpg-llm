@@ -959,12 +959,13 @@ function updateStatus(st, scenes) {
   if (S.busy) return;
   const cur = scenes[scenes.length - 1];
   const bits = [`Scene ${cur.id}${cur.location ? " · " + cur.location : ""}`];
-  if (st.tracking) bits.push("archivist reading…");
-  else if (st.last_verdict && Date.now() / 1000 - st.last_verdict.at < 60)
+  const details = S.data.show_details;  // off by default: just where you are
+  if (details && st.tracking) bits.push("archivist reading…");
+  else if (details && st.last_verdict && Date.now() / 1000 - st.last_verdict.at < 60)
     bits.push(st.last_verdict.transition ? `scene change? ${Math.round(st.last_verdict.confidence * 100)}%` : "same scene");
   if (st.compacting) bits.push("filing old scenes…");
-  if (st.condensing) bits.push("condensing the start of this session…");
-  if (st.last_sheet && Date.now() / 1000 - st.last_sheet.at < 90) bits.push(`📝 sheet: ${st.last_sheet.changes.join("; ")}`);
+  if (details && st.condensing) bits.push("condensing the start of this session…");
+  if (details && st.last_sheet && Date.now() / 1000 - st.last_sheet.at < 90) bits.push(`📝 sheet: ${st.last_sheet.changes.join("; ")}`);
   if (st.last_sheet && st.last_sheet.at !== S.sheetSeen) {
     S.sheetSeen = st.last_sheet.at;
     if ($("drawer").classList.contains("open") && $("drawerTitle").textContent === "Character") openSheet();

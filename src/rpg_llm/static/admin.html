@@ -469,6 +469,8 @@ async function loadCampaigns() {
         <label>Look</label><select data-f="theme">${Object.entries(THEMES).map(([v, t]) => `<option value="${v}" ${c.theme === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
         <label class="inline" style="margin-top:10px"><input type="checkbox" data-f="allow_rewind" ${c.allow_rewind ? "checked" : ""}>
           Allow rewinds (edit the last move or re-roll the GM's reply after seeing it)</label>
+        <label class="inline" style="margin-top:6px"><input type="checkbox" data-f="show_details" ${c.show_details ? "checked" : ""}>
+          Show archivist details above the input (scene checks, character sheet changes)</label>
         <div class="actions"><button class="primary" data-act="saveEdit">Save campaign</button></div>
       </div>
       <div class="actions">
