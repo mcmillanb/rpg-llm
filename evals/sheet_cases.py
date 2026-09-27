@@ -53,7 +53,29 @@ def has(items, *words):
     return any(w in i.lower() for i in items for w in words)
 
 
+FOUND = ("50-50 as agreed, lets open the box",
+         "You pry the lid free. Inside, packed in yellowed foam, are three pristine military-grade "
+         "power cells and a leather-bound logbook with Ben Vane's name on it. You lift the power "
+         "cells out into your work gloves and flip open the logbook. \"I'll take my half in cash "
+         "when we sell these cells,\" Darrow says.")
+OFFERED = ("knock and enter",
+           "You set the three power cells on Kess's desk. He taps one against his palm. \"High-"
+           "grade naval surplus.\" He scribbles on a datapad and slides it across. \"Two hundred "
+           "credits total. Fair market value.\" The cash is ready to hand over: two hundred more in "
+           "your account once these are transferred.")
+
+SOLD = ("Deal, I'll take the two hundred.",
+        "Kess counts two hundred credits into your hand and sweeps the three power cells into his "
+        "desk drawer. \"Pleasure doing business.\"")
+
+
 CASES = [
+    ("found and kept: cells in gear", FOUND,
+     lambda s: money(s) == 204 and has(s["gear"], "power cell", "cell")),
+    ("a price offered: no sale yet", OFFERED,
+     lambda s: money(s) == 204),
+    ("offer accepted and paid: money up", SOLD,
+     lambda s: money(s) == 404),
     # (the player went looking for a contract, so listing the offered job is a fair reading)
     ("ordered and quoted: no payment, no filters yet, pickup noted", ORDERED,
      lambda s: money(s) == 204 and not has(s["gear"], "filter") and has(s["obligations"], "kess")),
