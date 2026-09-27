@@ -116,6 +116,15 @@ def rewind(campaign: Campaign, first_dead_id: int) -> bool:
 
 # ---- records ------------------------------------------------------------------
 
+def _bare_name(v) -> str:
+    """'B. Kess (aka Kess)' or 'Marta (she)' -> the name alone: a model sometimes copies the
+    list's formatting back into a name."""
+    n = str(v or "")
+    n = re.split(r"\s*\((?:aka|also|a\.k\.a)\b", n, flags=re.I)[0]
+    n = re.sub(r"\s*\((?:he|she|they|it)(?:/\w+)*\)\s*$", "", n, flags=re.I)
+    return n.strip(" ,;:")
+
+
 def _text(v, limit: int = MAX_FIELD) -> str:
     v = " ".join(str(v or "").split())
     return v if len(v) <= limit else v[:limit - 1] + "…"
@@ -135,10 +144,10 @@ def good_alias(a: str, name: str) -> bool:
 
 
 def clean_person(p: dict) -> dict:
-    name = _text(p.get("name"), 80)
+    name = _text(_bare_name(p.get("name")), 80)
     out = {"name": name,
-           "aliases": sorted({_text(a, 80) for a in p.get("aliases") or []
-                              if good_alias(str(a), name)})}
+           "aliases": sorted({_text(_bare_name(a), 80) for a in p.get("aliases") or []
+                              if good_alias(_bare_name(a), name)})}
     for k in FIELDS[1:]:
         out[k] = _text(p.get(k))
     out["pronouns"] = pronouns(out["pronouns"]) if p.get("pronouns") else ""
@@ -204,7 +213,8 @@ def merge(cast: list[dict], found: list[dict], msg_id: int, pc_name: str = "",
     `source` is the text it read: a new person must be named in it."""
     changes = []
     for f in found:
-        name = _text(f.get("name"), 80)
+        name = _text(_bare_name(f.get("name")), 80)
+        f = {**f, "aliases": [_bare_name(a) for a in f.get("aliases") or []]}
         if (len(name) < 2 or not name[0].isupper() or _is_player(name, pc_name)
                 or (NOT_PEOPLE.search(f.get("role") or "")
                     and not set(pronouns(f.get("pronouns")).split("/")) & PERSONAL)):
@@ -262,9 +272,10 @@ def _chunks(messages: list[dict]) -> list[list[dict]]:
 
 
 def cast_text(cast: list[dict]) -> str:
-    return "\n".join(f"- {p['name']}" + (f" (aka {', '.join(p['aliases'])})" if p["aliases"] else "")
-                     + (f" ({p['pronouns']})" if p["pronouns"] else "")
-                     + (f": {p['role']}" if p["role"] else "") for p in cast) or "(nobody yet)"
+    """One line per person, in a shape that doesn't look like a name when copied back."""
+    return "\n".join(f"- name: {p['name']}" + (f"; also called: {', '.join(p['aliases'])}" if p["aliases"] else "")
+                     + (f"; pronouns: {p['pronouns']}" if p["pronouns"] else "")
+                     + (f"; role: {p['role']}" if p["role"] else "") for p in cast) or "(nobody yet)"
 
 
 async def catch_up(campaign: Campaign, router: LLMClient, lock, pc_name: str = "",

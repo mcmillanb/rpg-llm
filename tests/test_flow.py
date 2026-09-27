@@ -1088,3 +1088,11 @@ def test_people_portraits_are_kept_by_every_name(vault):
                                     "Traveller")
     assert prompt.startswith("A man, freight broker. Appearance: grey beard.")
     assert portrait.not_human({"pronouns": "she", "role": "ship AI"}) and not portrait.not_human({"pronouns": "he", "role": "broker"})
+
+
+def test_names_copied_with_list_formatting_are_cleaned():
+    people = []
+    cast.merge(people, [person("B. Kess (aka B. Kess (aka Kess), Kess)", pronouns="he",
+                               aliases=["B. Kess (aka Kess)", "Kess"]),
+                        person("Marta (she)", pronouns="she", aliases=["Marta (aka Marta (she))"])], 5)
+    assert [(p["name"], p["aliases"]) for p in people] == [("B. Kess", ["Kess"]), ("Marta", [])]
