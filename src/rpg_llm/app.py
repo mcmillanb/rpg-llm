@@ -268,6 +268,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     stats = {"prompt_tokens": 0, "cached_tokens": 0, "prompt_ms": 0, "completion_tokens": 0,
              "rounds": 0}
     t_dm = time.time()
+    retried = False
     yield sse({"type": "status", "text": ""})
     for n in range(MAX_TOOL_ROUNDS + 1):
         if n == MAX_TOOL_ROUNDS:  # still looking things up: make it answer with what it has
@@ -297,6 +298,13 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                 stats["prompt_ms"] += u.get("prompt_ms") or 0
                 stats["completion_tokens"] += u.get("completion_tokens") or 0
         content += round_content
+        if not calls and not content.strip() and not rolls and not retried:
+            # the model sometimes ends its turn at once, with no text at all: ask once more
+            retried = True
+            stats["empty_retry"] = True
+            log.warning("DM turn %s: empty reply, asking again", c.slug)
+            yield sse({"type": "status", "text": "the GM stalled; asking again…"})
+            continue
         if not calls:
             break
         convo.append({"role": "assistant", "content": round_content, "tool_calls": [

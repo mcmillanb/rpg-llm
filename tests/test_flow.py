@@ -1015,3 +1015,14 @@ def test_roll_request_pasted_as_text_becomes_a_real_request():
     req2, _ = dice.request_from_args_text('Go.\n{"dice": "d20+3", "prompt": "Roll to climb"}', "1")
     assert (req2["dice"], req2["prompt"]) == ("1D20+3", "Roll to climb")
     assert dice.request_from_args_text("The dice are cast.", "1") is None
+
+
+def test_an_empty_reply_is_asked_again_once(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=[[], [{"content": "The lock gives."}]])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)]), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T"}).json()["slug"]
+        sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "I pick the lock"}))
+        msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
+        assert msgs[-1]["content"] == "The lock gives." and msgs[-1]["stats"]["empty_retry"]

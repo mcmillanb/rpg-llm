@@ -902,6 +902,7 @@ async function cancelTurn() {
 async function runTurn(path, body, optimisticUser, kind = "chat", extra = {}) {
   if (S.busy) return;
   setBusy(true);
+  S.sentAt = Date.now();
   S.abort = new AbortController();
   S.turn = { kind };
   if (optimisticUser) S.data.messages.push({ id: Infinity, role: "user", content: optimisticUser });
@@ -953,7 +954,9 @@ async function runTurn(path, body, optimisticUser, kind = "chat", extra = {}) {
 }
 
 function send() {
-  if (S.busy) return cancelTurn();
+  // a quick second click (or tap) on Send lands on "Stop": ignore it rather than take the
+  // message back
+  if (S.busy) return Date.now() - (S.sentAt || 0) < 2000 ? undefined : cancelTurn();
   const text = $("input").value.trim();
   if (!text) return;
   $("input").value = ""; autosize();

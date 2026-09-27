@@ -376,6 +376,14 @@ What each field holds, and nothing else:
   deadlines, summonses, sworn enemies. NOT their own plans, tactics or intentions ("claim the
   seal is forged", "never admit X", "call Maren") and NOT clues. Remove ones settled.
 
+Not yet: these change nothing until the story shows them done.
+- Ordered, reserved or promised for later: not gear until the character has it in hand. Put
+  the arrangement in obligations instead ("Collect filters from Kess at Dock 12, first light,
+  90 Cr").
+- A price quoted or agreed: not paid. Money changes only when the narration shows money
+  actually handed over or received.
+- A job, deal or contract offered: not an obligation until the character accepts it.
+
 Keep each list to the dozen most important entries. When in doubt, leave it off the sheet:
 the story itself is recorded elsewhere.
 
