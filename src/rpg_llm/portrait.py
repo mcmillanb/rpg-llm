@@ -116,14 +116,41 @@ def person_file(index: dict[str, str], names: list[str]) -> str | None:
     return None
 
 
+NOT_HUMAN = re.compile(r"\b(ai|a\.i\.|computer|machine|robot|android|droid|drone|synth|entity|"
+                       r"creature|spirit|ghost|construct|intelligence|beast|alien)\b", re.I)
+
+
+MACHINE_MIND = re.compile(r"\b(ai|a\.i\.|computer|intelligence|mind)\b", re.I)
+
+
+def not_human(p: dict) -> bool:
+    return ((p.get("pronouns") or "").startswith("it")
+            or bool(NOT_HUMAN.search(p.get("role") or "")))
+
+
+async def paint_person(cfg: ImageGen, look: str, p: dict, system: str) -> bytes:
+    prompt = person_prompt(p, system)
+    if not_human(p):
+        return await images.generate(cfg, images.presence_prompt(look, prompt), SIZE, SIZE,
+                                     negative=images.PRESENCE_NEGATIVE)
+    return await paint(cfg, look, prompt)
+
+
 def person_prompt(p: dict, system: str) -> str:
-    who = GENDER.get((p.get("pronouns") or "").split("/")[0], "")
-    bits = [f"A {who}" if who else "A character", p.get("role") or ""]
-    text = ", ".join(b for b in bits if b) + "."
-    if p.get("look"):
-        text += f" Appearance: {p['look']}."
-    if (p.get("pronouns") or "").startswith("it"):
-        text += " Not necessarily human: show them as the text describes."
+    role, look = (p.get("role") or "").strip(), (p.get("look") or "").strip()
+    pron = (p.get("pronouns") or "").split("/")[0]
+    if not_human(p):  # the ship's AI or a strange entity: painted as a presence, no face
+        text = f"{role or 'a strange presence'}."
+        if look:
+            text += f" It appears as: {look}."
+        if MACHINE_MIND.search(role):
+            text += " Shown as a glowing core of light or a screen interface, not a robot body."
+    else:
+        who = GENDER.get(pron, "")
+        text = ", ".join(b for b in (f"A {who}" if who else "A character", role) if b) + "."
+        if look:
+            text += f" Appearance: {look}."
+        text += " Dressed for their work and place, not in armour unless described."
     return f"{text} From a {system or 'role-playing'} story."
 
 

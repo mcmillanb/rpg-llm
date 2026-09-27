@@ -1087,3 +1087,4 @@ def test_people_portraits_are_kept_by_every_name(vault):
     prompt = portrait.person_prompt({"pronouns": "he", "role": "freight broker", "look": "grey beard"},
                                     "Traveller")
     assert prompt.startswith("A man, freight broker. Appearance: grey beard.")
+    assert portrait.not_human({"pronouns": "she", "role": "ship AI"}) and not portrait.not_human({"pronouns": "he", "role": "broker"})

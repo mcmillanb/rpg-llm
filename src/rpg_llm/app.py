@@ -169,8 +169,7 @@ class Runtime:
                 if not todo:
                     return
                 p = todo[0]
-                webp = await portrait.paint(cfg, look, portrait.person_prompt(
-                    p, c.meta.get("system") or ""))
+                webp = await portrait.paint_person(cfg, look, p, c.meta.get("system") or "")
                 portrait.add_person(c, cast.names_of(p), webp)
         except Exception as e:
             log.exception("painting people failed")
@@ -874,7 +873,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(404, f"nobody called {body.name!r}")
         look = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
         try:
-            webp = await portrait.paint(cfg, look, portrait.person_prompt(p, c.meta.get("system") or ""))
+            webp = await portrait.paint_person(cfg, look, p, c.meta.get("system") or "")
         except images.ImageError as e:
             raise HTTPException(502, str(e))
         return {"portrait": portrait.add_person(c, cast.names_of(p), webp)}

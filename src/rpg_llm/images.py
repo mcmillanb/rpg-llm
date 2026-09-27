@@ -124,6 +124,16 @@ async def generate(cfg: ImageGen, prompt: str, width: int = 512, height: int = 5
         raise ImageError(f"couldn't read the generated image: {e}")
 
 
+PRESENCE_STYLE = ("Painterly {look} illustration of something that is not a person: {prompt} A "
+                  "close, atmospheric view that fills the whole square, rich colour, clearly lit, "
+                  "the subject centred. No people, no human face, no frame or border, no text.")
+PRESENCE_NEGATIVE = NEGATIVE + ", person, human, human face, man, woman, portrait of a person, armour"
+
+
+def presence_prompt(look: str, prompt: str) -> str:
+    return PRESENCE_STYLE.format(look=LOOKS.get(look, LOOKS["plain"]), prompt=prompt)
+
+
 def portrait_prompt(look: str, prompt: str) -> str:
     return PORTRAIT_STYLE.format(look=LOOKS.get(look, LOOKS["plain"]), light=LIGHT.get(look, BRIGHT),
                                  prompt=prompt)
