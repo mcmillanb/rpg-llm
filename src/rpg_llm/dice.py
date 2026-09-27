@@ -21,8 +21,8 @@ REQUEST_TOOL = {"type": "function", "function": {
     "name": "request_roll",
     "description": "Ask the player to roll on-screen dice for an uncertain action, then end your "
                    "reply without narrating the outcome. Include the character's modifier in "
-                   "dice; the prompt is a few words. Example: dice='d20+5', "
-                   "prompt='Roll to attack the goblin', target=13.",
+                   "dice; the prompt is a few words. Call it as a tool: never write its "
+                   "arguments into the story.",
     "parameters": {"type": "object", "properties": {
         "dice": {"type": "string", "description": "e.g. 2D6, 2D6+1, d20+3, d100"},
         "prompt": {"type": "string", "description": "a few words, e.g. 'Roll to attack the goblin'"},
@@ -115,6 +115,44 @@ _TEXT_REQUEST = re.compile(
     r"\broll\s+(?:a\s+|an\s+)?(\d*\s*d\s*(?:\d+|%)(?:\s*[+-]\s*\d+)?)"  # dice
     r"\s*(?:\(([^)]*)\))?"                                                  # (Target 8+)
     r"(?:\s*(?:to|for)\s+([^.\n]{3,200}))?", re.I)
+
+
+# The GM pasted the tool's arguments into its reply instead of calling it, e.g.
+#   dice='2D6+2', prompt='Roll to fit the valve', target=8
+#   request_roll(dice="d20+3", prompt="Roll to climb")   or   {"dice": "2D6", "target": 8}
+_ARGS_LINE = re.compile(r"""^[ \t>*`]*(?:request_roll\s*\(?\s*)?\{?\s*["']?dice["']?\s*[=:]\s*"""
+                        r"""["']([^"'\n]+)["'][^\n]*$\n?""", re.M | re.I)
+
+
+def _arg(line: str, name: str) -> str | None:
+    m = re.search(rf"""["']?{name}["']?\s*[=:]\s*(?:["']([^"'\n]*)["']|(\d+))""", line, re.I)
+    return (m.group(1) if m.group(1) is not None else m.group(2)) if m else None
+
+
+def request_from_args_text(text: str, key: str) -> tuple[dict, str] | None:
+    """Fallback for a GM that writes the request_roll arguments as text. Returns the request and
+    the reply with that line taken out."""
+    matches = list(_ARGS_LINE.finditer(text or ""))
+    if not matches:
+        return None
+    m = matches[-1]
+    line = m.group(0)
+    args = {"dice": m.group(1), "prompt": _arg(line, "prompt") or ""}
+    target = _arg(line, "target")
+    if target and target.isdigit():
+        args["target"] = int(target)
+    if (_arg(line, "success_if") or "") == "at_most":
+        args["success_if"] = "at_most"
+    try:
+        req = request(args)
+    except ValueError:
+        return None
+    req["id"] = "t" + hashlib.sha1(f"{key}:{line}".encode()).hexdigest()[:11]
+    req["from_text"] = True
+    if not req["prompt"] or req["prompt"] == "Roll":
+        req["prompt"] = f"Roll {req['dice']}"
+    cleaned = (text[:m.start()] + text[m.end():]).strip()
+    return req, cleaned
 
 
 def request_from_text(text: str, key: str) -> dict | None:

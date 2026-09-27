@@ -4,7 +4,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from rpg_llm import cast, compactor, context, panels, router, sheet, wiki
+from rpg_llm import cast, compactor, context, dice, panels, router, sheet, wiki
 from rpg_llm.app import Runtime, create_app
 from rpg_llm.config import AppConfig, Env, Settings, Tuning
 from rpg_llm.vault import Scene, State, Vault
@@ -1003,3 +1003,15 @@ def test_notes_correct_a_person_the_gm_misgendered(vault):
     block = cast.notes_block(c, c.messages())
     assert 'Correction: Kess is he. Recent replies wrongly used "she"' in block
     assert "Correction: Marta" not in block
+
+
+def test_roll_request_pasted_as_text_becomes_a_real_request():
+    reply = ('"Steady," Mother whispers.\n\nRoll to fit the brass valve to the coolant manifold.\n'
+             "dice='2D6+2', prompt='Roll to fit the brass valve to the coolant manifold', target=8")
+    req, cleaned = dice.request_from_args_text(reply, "207")
+    assert (req["dice"], req["target"], req["success_if"]) == ("2D6+2", 8, "at_least")
+    assert req["prompt"] == "Roll to fit the brass valve to the coolant manifold"
+    assert cleaned.endswith("coolant manifold.") and "dice=" not in cleaned
+    req2, _ = dice.request_from_args_text('Go.\n{"dice": "d20+3", "prompt": "Roll to climb"}', "1")
+    assert (req2["dice"], req2["prompt"]) == ("1D20+3", "Roll to climb")
+    assert dice.request_from_args_text("The dice are cast.", "1") is None

@@ -343,7 +343,11 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     if rolls:
         entry["rolls"] = rolls
     if not requested and mode == "virtual" and content.strip():
-        requested = dice.request_from_text(content, f"{user['id']}")
+        pasted = dice.request_from_args_text(content, f"{user['id']}")
+        if pasted:  # the GM wrote the tool call as text: make it real, drop the stray line
+            requested, entry["content"] = pasted
+        else:
+            requested = dice.request_from_text(content, f"{user['id']}")
     if requested:
         entry["roll_request"] = requested
     if supersedes:
@@ -439,7 +443,9 @@ def pending_roll(c: Campaign, msgs: list[dict]) -> dict | None:
     if last.get("roll_request"):
         return last["roll_request"]
     if context.table(c.meta)["dice"] == "virtual":
-        return dice.request_from_text(last.get("content", ""), str(last["id"]))
+        pasted = dice.request_from_args_text(last.get("content", ""), str(last["id"]))
+        return pasted[0] if pasted else dice.request_from_text(last.get("content", ""),
+                                                               str(last["id"]))
     return None
 
 
@@ -640,7 +646,9 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         msgs = c.messages()
         req = pending_roll(c, msgs)
         if req and not msgs[-1].get("roll_request"):
-            msgs[-1] = {**msgs[-1], "roll_request": req}
+            pasted = dice.request_from_args_text(msgs[-1]["content"], str(msgs[-1]["id"]))
+            msgs[-1] = {**msgs[-1], "roll_request": req,
+                        **({"content": pasted[1]} if pasted else {})}
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
                 "table": context.table(c.meta),
                 "portrait": portrait.current(c),
