@@ -101,6 +101,11 @@ def rewind(campaign: Campaign, first_dead_id: int) -> bool:
     if not hist or hist[-1]["after"] < first_dead_id:
         return False
     keep = [h for h in hist if h["after"] < first_dead_id]
+    edits = [h for h in hist if h["after"] >= first_dead_id and h["what"] == "edited by the player"]
+    if edits:  # the player's own corrections survive; the dead turns get read again
+        last = edits[-1]
+        keep.append({**last, "after": first_dead_id - 1,
+                     "cast": {**last["cast"], "until": min(last["cast"]["until"], first_dead_id - 1)}})
     if keep:
         campaign.write(FILE, yaml.safe_dump(keep[-1]["cast"], sort_keys=False,
                                             allow_unicode=True, width=100))

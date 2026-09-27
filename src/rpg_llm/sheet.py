@@ -123,12 +123,19 @@ def notes_block(sheet: dict | None) -> str:
     return "\n".join(lines)
 
 
+PLAYER_EDIT = "edited by the player"
+
+
 def rewind(campaign: Campaign, first_dead_id: int) -> bool:
-    """A turn from first_dead_id on was taken back: restore the sheet as it was before it."""
+    """A turn from first_dead_id on was taken back: restore the sheet as it was before it.
+    A correction the player made by hand since then isn't something the turn did: it stays."""
     hist = history(campaign)
     if not hist or hist[-1]["after"] < first_dead_id:
         return False
     keep = [h for h in hist if h["after"] < first_dead_id]
+    edits = [h for h in hist if h["after"] >= first_dead_id and h["what"] == PLAYER_EDIT]
+    if edits:
+        keep.append({**edits[-1], "after": first_dead_id - 1})
     if keep:
         campaign.write(FILE, yaml.safe_dump(keep[-1]["sheet"], sort_keys=False,
                                             allow_unicode=True, width=100))

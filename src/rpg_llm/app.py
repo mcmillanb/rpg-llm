@@ -850,7 +850,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         c = rt.campaign(slug)
         msgs = c.messages()
         async with rt.lock(slug):
-            saved = sheet.save(c, body, msgs[-1]["id"] if msgs else 0, "edited by the player")
+            saved = sheet.save(c, body, msgs[-1]["id"] if msgs else 0, sheet.PLAYER_EDIT)
         return {"sheet": saved}
 
     @app.get("/api/campaigns/{slug}/people")

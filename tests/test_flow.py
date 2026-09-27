@@ -1146,3 +1146,15 @@ async def test_sheet_money_only_changes_when_the_exchange_is_about_money(vault):
     await sheet.update(c, llm)
     assert sheet.load(c)["money"] == "259 Cr"
     assert llm.calls[0][1][0]["content"] == sheet.SYSTEM  # no brief or wiki once a sheet exists
+
+
+def test_a_hand_correction_survives_a_rewind(vault):
+    c = vault.create("T")
+    sheet.save(c, {"name": "C", "money": "272 Cr"}, 4, "turn")
+    sheet.save(c, {"name": "C", "money": "-208 Cr"}, 6, "turn")    # a bad update
+    sheet.save(c, {"name": "C", "money": "12 Cr"}, 8, sheet.PLAYER_EDIT)  # fixed by hand
+    sheet.save(c, {"name": "C", "money": "0 Cr"}, 8, "turn")        # the turn being re-rolled
+    assert sheet.rewind(c, 7)  # re-roll the reply after message 7
+    assert sheet.load(c)["money"] == "12 Cr"
+    assert sheet.rewind(c, 5)  # further back: the hand fix still stands
+    assert sheet.load(c)["money"] == "12 Cr"
