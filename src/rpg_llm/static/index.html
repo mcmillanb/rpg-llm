@@ -310,6 +310,16 @@ body[data-look] #drawer { backdrop-filter: blur(10px); }
 .pcard .pport { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; padding: 2px;
   background: #f7f4ee; border: 1px solid rgba(0,0,0,.12); }
 .pcard.focus { outline: 2px solid var(--accent); }
+.pcard .pport { cursor: zoom-in; }
+.npcs img { cursor: zoom-in; }
+#lightbox { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.72); display: flex;
+  align-items: center; justify-content: center; padding: 16px; cursor: zoom-out; }
+#lightbox figure { margin: 0; text-align: center; cursor: default; }
+#lightbox img { width: min(512px, 88vw, 70vh); height: auto; aspect-ratio: 1; border-radius: 18px;
+  padding: 5px; background: #f7f4ee; box-shadow: 0 12px 40px rgba(0,0,0,.6); display: block; }
+#lightbox figcaption { margin-top: 12px; color: #f2efe8; font-size: 15px; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+#lightbox figcaption .muted { color: rgba(242,239,232,.75); }
+#lightbox a { color: #f2efe8; text-decoration: underline; cursor: pointer; font-size: 13px; }
 .pcard .pline { margin-top: 3px; }
 .pcard ul { margin: 6px 0 0; padding-left: 1.2em; }
 .pcard .edit { padding: 2px 8px; font-size: 12px; flex: none; }
@@ -376,6 +386,10 @@ body[data-look] #tray { backdrop-filter: blur(10px); }
     <button id="trayFun" title="Just roll: nothing is sent">Roll for fun</button>
     <button id="traySend" class="primary" title="Roll, and the GM narrates the result as your move">Roll and send to the GM</button>
   </div>
+</div>
+<div id="lightbox" class="hidden" role="dialog" aria-label="Portrait">
+  <figure><img id="lbImg" alt=""><figcaption class="ui"><strong id="lbName"></strong> <span id="lbWho" class="muted"></span>
+    <div><a id="lbPeople">Open in People</a></div></figcaption></figure>
 </div>
 <div id="modal" class="hidden"></div>
 <aside id="drawer">
@@ -808,6 +822,20 @@ function rolledHTML(r) {
   return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${r.rolls.map(v => dieSVG(d.sides, v)).join("")}${mod} = <strong>${r.total}</strong> ${needText(r) ? `<span class="muted">(${needText(r)})</span>` : ""} ${res}</div>`;
 }
 
+// ---- a portrait at full size -----------------------------------------------------------------
+function showPortrait(name, fromPanel = false) {
+  const p = (S.data.people_art || []).find(x => x.name === name);
+  if (!p) return;
+  $("lbImg").src = `/api/campaigns/${S.slug}/people/art/${p.file}`;
+  $("lbImg").alt = p.name;
+  $("lbName").textContent = p.name;
+  $("lbWho").textContent = [p.pronouns, p.role].filter(Boolean).join(" · ");
+  $("lbPeople").parentElement.classList.toggle("hidden", fromPanel);
+  $("lbPeople").onclick = () => { closePortrait(); PEOPLE_FOCUS = p.name; PANEL === "people" ? renderPeople() : openPanel("people"); };
+  $("lightbox").classList.remove("hidden");
+}
+function closePortrait() { $("lightbox").classList.add("hidden"); }
+
 // The people named in a GM message who have a portrait, in order of first mention (up to 3).
 function peopleIn(text) {
   const out = [];
@@ -927,7 +955,7 @@ function renderChat(scroll) {
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
   $("view").querySelectorAll(".avatar").forEach(a => a.onclick = () => openPanel("character"));
-  $("view").querySelectorAll("[data-person]").forEach(a => a.onclick = () => { PEOPLE_FOCUS = a.dataset.person; PANEL === "people" ? renderPeople() : openPanel("people"); });
+  $("view").querySelectorAll("[data-person]").forEach(a => a.onclick = () => showPortrait(a.dataset.person));
   $("view").querySelectorAll(".rollreq.live").forEach(card => {
     const go = () => rollDice(card.dataset.roll);
     card.querySelector("[data-act=roll]").onclick = go;
@@ -1099,6 +1127,8 @@ function closeTray() { $("tray").classList.add("hidden"); }
 document.querySelectorAll("#tray [data-n]").forEach(b => b.onclick = () => { TRAY.count = Math.min(10, Math.max(1, TRAY.count + +b.dataset.n)); drawTray(); });
 document.querySelectorAll("#tray [data-m]").forEach(b => b.onclick = () => { TRAY.mod = Math.min(20, Math.max(-20, TRAY.mod + +b.dataset.m)); drawTray(); });
 $("trayClose").onclick = closeTray;
+$("lightbox").onclick = (e) => { if (e.target === $("lightbox")) closePortrait(); };
+$("lbImg").onclick = closePortrait;
 $("diceBtn").onclick = openTray;
 $("trayFun").onclick = () => {
   const rolls = Array.from({ length: TRAY.count }, () => 1 + Math.floor(Math.random() * TRAY.sides));
@@ -1375,7 +1405,7 @@ function drawPeople(filter) {
   $("peopleList").innerHTML = shown.map(([p, i]) => {
     const seen = p.last ? sceneOfMsg(p.last) : null;
     return `<div class="pcard" data-i="${i}">
-      <div class="ptop"><div class="pwho">${p.portrait ? `<img class="pport" src="/api/campaigns/${S.slug}/people/art/${p.portrait}" alt="">` : ""}
+      <div class="ptop"><div class="pwho">${p.portrait ? `<img class="pport" data-zoom="${esc(p.name)}" src="/api/campaigns/${S.slug}/people/art/${p.portrait}" alt="" title="Click to see it bigger">` : ""}
           <div><span class="pname">${esc(p.name || "(new)")}</span>${p.pronouns ? ` <span class="muted">· ${esc(p.pronouns)}</span>` : ""}</div></div>
         <span>${PEOPLE_IMAGES && p.name ? `<button class="edit" data-paint="${i}" title="${p.portrait ? "Paint a new portrait" : "Paint a portrait"} (uses their role and looks)">🎨</button> ` : ""}<button class="edit" data-edit="${i}">Edit</button></span></div>
       ${p.role ? `<div class="pline">${esc(p.role)}</div>` : ""}
@@ -1388,6 +1418,7 @@ function drawPeople(filter) {
     </div>`;
   }).join("") || `<p class="muted">${q ? "Nobody matches." : "Nobody yet: people are added as you meet them."}</p>`;
   $("peopleList").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editPerson(+b.dataset.edit));
+  $("peopleList").querySelectorAll("[data-zoom]").forEach(img => img.onclick = () => showPortrait(img.dataset.zoom, true));
   $("peopleList").querySelectorAll("[data-paint]").forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = "…";
     try {
@@ -1520,6 +1551,7 @@ function toggleArt(on = !document.body.dataset.viewart) {
 }
 $("artBtn").onclick = () => toggleArt();
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("lightbox").classList.contains("hidden")) { e.preventDefault(); closePortrait(); return; }
   if (e.key === "Escape" && document.body.dataset.viewart) { e.preventDefault(); toggleArt(false); return; }
   if (e.key !== "Escape" || !S.slug) return;
   if (!$("tray").classList.contains("hidden")) { e.preventDefault(); closeTray(); return; }

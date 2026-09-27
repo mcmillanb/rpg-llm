@@ -504,7 +504,8 @@ def people_art(c: Campaign) -> list[dict]:
     for p in cast.people(c):
         f = portrait.person_file(index, cast.names_of(p))
         if f:
-            out.append({"name": p["name"], "names": cast.names_of(p), "file": f})
+            out.append({"name": p["name"], "names": cast.names_of(p), "file": f,
+                        "pronouns": p["pronouns"], "role": p["role"]})
     return out
 
 
