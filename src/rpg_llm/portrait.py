@@ -100,7 +100,47 @@ def choose(campaign: Campaign, name: str, prompt: str | None = None) -> None:
 
 PEOPLE_DIR = "art/people"
 PEOPLE_INDEX = "art/people/index.yaml"
+PEOPLE_PAINTED = "art/people/painted.yaml"  # portrait file -> the details it was painted from
 GENDER = {"he": "man", "she": "woman", "they": "person"}
+# What a name or title says when the record has no pronouns or looks yet ("Old man Miller").
+_MAN = r"man|mr|mister|sir|lord|father|brother|uncle|grandpa|grandfather|gramps|king|prince|duke|baron|master|boy|lad|son|herr|monsieur|senor|señor"
+_WOMAN = r"woman|mrs|miss|ms|madam|madame|lady|mother|sister|aunt|granny|grandma|grandmother|queen|princess|duchess|dame|mistress|girl|lass|daughter|frau|senora|señora"
+_OLD = r"old|elder|elderly|aged|ancient|auld|granny|grandma|grandpa|gramps|grandfather|grandmother"
+_YOUNG = r"young|little|kid|boy|girl|lad|lass"
+
+
+def name_hints(name: str) -> tuple[str, str]:
+    """('man' / 'woman' / '', 'elderly' / 'young' / '') from a name's titles and words."""
+    n = (name or "").lower()
+    has = lambda words: re.search(rf"(?<![a-z])({words})(?![a-z])", n)
+    who = "man" if has(_MAN) else "woman" if has(_WOMAN) else ""
+    age = "elderly" if has(_OLD) else "young" if has(_YOUNG) else ""
+    return who, age
+
+
+def detail(p: dict) -> dict:
+    return {"pronouns": p.get("pronouns") or "", "look": p.get("look") or ""}
+
+
+def painted(campaign: Campaign) -> dict[str, dict]:
+    text = campaign.read(PEOPLE_PAINTED)
+    data = yaml.safe_load(text) if text.strip() else {}
+    return data if isinstance(data, dict) else {}
+
+
+def needs_paint(campaign: Campaign, p: dict, index: dict, done: dict) -> bool:
+    """No portrait yet (and something to paint from), or one painted from a thin first
+    sighting (no pronouns or no looks) that the record has since filled in: repaint it once."""
+    if not (p.get("look") or p.get("role") or p.get("pronouns")):
+        return False
+    f = person_file(index, [p["name"], *p.get("aliases", [])])
+    if not f:
+        return True
+    was = done.get(f)
+    if was is None:  # painted before details were tracked: leave it
+        return False
+    now = detail(p)
+    return any(not was[k] and now[k] for k in ("pronouns", "look"))
 
 
 def people_index(campaign: Campaign) -> dict[str, str]:
@@ -146,15 +186,19 @@ def person_prompt(p: dict, system: str) -> str:
         if MACHINE_MIND.search(role):
             text += " Shown as a glowing core of light or a screen interface, not a robot body."
     else:
-        who = GENDER.get(pron, "")
-        text = ", ".join(b for b in (f"A {who}" if who else "A character", role) if b) + "."
+        hint_who, age = name_hints(p.get("name", ""))
+        who = GENDER.get(pron, "") or hint_who
+        person = " ".join(w for w in (age, who) if w) or "character"
+        article = "An" if person[0] in "aeiou" else "A"
+        text = ", ".join(b for b in (f"{article} {person}", role) if b)
+        text += f", known as {p['name']}." if p.get("name") else "."
         if look:
             text += f" Appearance: {look}."
         text += " Dressed for their work and place, not in armour unless described."
     return f"{text} From a {system or 'role-playing'} story."
 
 
-def add_person(campaign: Campaign, names: list[str], webp: bytes) -> str:
+def add_person(campaign: Campaign, names: list[str], webp: bytes, painted_from: dict | None = None) -> str:
     index = people_index(campaign)
     base = slugify(names[0])[:40] or "person"
     n = 1
@@ -166,6 +210,10 @@ def add_person(campaign: Campaign, names: list[str], webp: bytes) -> str:
     for key in names:
         index[key.lower()] = name
     campaign.write(PEOPLE_INDEX, yaml.safe_dump(index, sort_keys=True, allow_unicode=True))
+    if painted_from is not None:
+        done = painted(campaign)
+        done[name] = painted_from
+        campaign.write(PEOPLE_PAINTED, yaml.safe_dump(done, sort_keys=True, allow_unicode=True))
     return name
 
 

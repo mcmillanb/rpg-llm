@@ -163,15 +163,14 @@ class Runtime:
         try:
             look = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
             while True:
-                index = portrait.people_index(c)
+                index, done = portrait.people_index(c), portrait.painted(c)
                 todo = [p for p in sorted(cast.people(c), key=lambda p: -p["last"])
-                        if (p["look"] or p["role"])
-                        and not portrait.person_file(index, cast.names_of(p))]
+                        if portrait.needs_paint(c, p, index, done)]
                 if not todo:
                     return
                 p = todo[0]
                 webp = await portrait.paint_person(cfg, look, p, c.meta.get("system") or "")
-                portrait.add_person(c, cast.names_of(p), webp)
+                portrait.add_person(c, cast.names_of(p), webp, portrait.detail(p))
         except Exception as e:
             log.exception("painting people failed")
             self.images_down_until = time.time() + 900  # try again in a while, not every turn
@@ -892,7 +891,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             webp = await portrait.paint_person(cfg, look, p, c.meta.get("system") or "")
         except images.ImageError as e:
             raise HTTPException(502, str(e))
-        return {"portrait": portrait.add_person(c, cast.names_of(p), webp)}
+        return {"portrait": portrait.add_person(c, cast.names_of(p), webp, portrait.detail(p))}
 
     @app.put("/api/campaigns/{slug}/people")
     async def put_people(slug: str, body: PeopleIn):

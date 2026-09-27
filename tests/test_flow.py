@@ -1087,6 +1087,11 @@ def test_people_portraits_are_kept_by_every_name(vault):
     prompt = portrait.person_prompt({"pronouns": "he", "role": "freight broker", "look": "grey beard"},
                                     "Traveller")
     assert prompt.startswith("A man, freight broker. Appearance: grey beard.")
+    assert portrait.person_prompt({"name": "Old man Miller", "role": "farmer"}, "T").startswith(
+        "An elderly man, farmer, known as Old man Miller.")
+    assert portrait.name_hints("Old man Miller") == ("man", "elderly")
+    assert portrait.name_hints("Granny Weatherwax") == ("woman", "elderly")
+    assert portrait.name_hints("Kess") == ("", "")
     assert portrait.not_human({"pronouns": "she", "role": "ship AI"}) and not portrait.not_human({"pronouns": "he", "role": "broker"})
 
 
@@ -1117,3 +1122,16 @@ def test_filing_starts_in_a_pause_once_two_scenes_wait(tmp_path, monkeypatch):
                                Scene(3, 5)]))
     rt.maybe_compact_idle(c)
     assert started == [1]
+
+
+def test_a_thin_portrait_is_repainted_once_details_arrive(vault):
+    c = vault.create("T")
+    miller = {"name": "Old man Miller", "aliases": [], "pronouns": "", "role": "farmer", "look": ""}
+    assert portrait.needs_paint(c, miller, {}, {})
+    f = portrait.add_person(c, ["Old man Miller"], b"x", portrait.detail(miller))
+    idx, done = portrait.people_index(c), portrait.painted(c)
+    assert not portrait.needs_paint(c, miller, idx, done)
+    fuller = {**miller, "pronouns": "he", "look": "stooped, white beard"}
+    assert portrait.needs_paint(c, fuller, idx, done)
+    portrait.add_person(c, ["Old man Miller"], b"y", portrait.detail(fuller))
+    assert not portrait.needs_paint(c, fuller, portrait.people_index(c), portrait.painted(c))
