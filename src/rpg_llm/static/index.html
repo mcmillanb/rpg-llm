@@ -299,6 +299,19 @@ body[data-look] #drawer { backdrop-filter: blur(10px); }
 .pcard.here { border-color: var(--accent); }
 .drawer-md p { margin: 0 0 .6em; } .drawer-md ul { margin: 0 0 .6em; padding-left: 1.2em; }
 #drawer details summary { cursor: pointer; }
+#diceBtn { font-size: 16px; padding: 6px 10px; }
+body[data-viewart] #diceBtn { opacity: 0; pointer-events: none; }
+#tray { position: fixed; z-index: 15; bottom: 92px; right: max(16px, 10%); width: min(380px, calc(100% - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 14px;
+  box-shadow: 0 10px 34px rgba(0,0,0,.35); }
+body[data-look] #tray { backdrop-filter: blur(10px); }
+.trayrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0; }
+.trayrow button { padding: 2px 8px; }
+#traySides button { padding: 0; border: 0; background: none; opacity: .55; }
+#traySides button.on { opacity: 1; }
+#traySides .die { width: 38px; height: 38px; }
+#traySides .die text { font-size: 30px; }
+.traynote { font: 600 18px system-ui, sans-serif; }
 </style>
 </head>
 <body>
@@ -317,6 +330,7 @@ body[data-look] #drawer { backdrop-filter: blur(10px); }
       <div class="footrow"><div id="statusline" class="ui muted"></div><span id="railSlot"></span></div>
       <div class="composer">
         <textarea id="input" rows="1" placeholder="What do you do?  (Esc stops a reply and takes your message back · ↑ edits your last message)"></textarea>
+        <button id="diceBtn" class="hidden" title="Dice tray: roll any dice, for fun or for the GM" aria-label="Dice tray">🎲</button>
         <button id="artBtn" class="hidden" title="View the artwork (click again, or Esc, to bring the messages back)" aria-label="View the artwork">👁</button>
         <button id="send" class="primary">Send</button>
       </div>
@@ -332,6 +346,20 @@ body[data-look] #drawer { backdrop-filter: blur(10px); }
   <span class="sep"></span>
   <button data-panel="archive" title="Archive: the GM’s memory, for the curious" aria-label="Archive: the GM’s memory, for the curious"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9"/><path d="M10 13h4"/></svg><span class="dot"></span></button>
 </nav>
+<div id="tray" class="hidden ui" role="dialog" aria-label="Dice tray">
+  <div class="sheethead"><strong>Dice tray</strong><button id="trayClose" title="Close (Esc)">✕</button></div>
+  <div class="trayrow" id="traySides"></div>
+  <div class="trayrow">
+    <span class="muted">Dice</span><button data-n="-1">−</button><strong id="trayCount">1</strong><button data-n="1">+</button>
+    <span class="muted" style="margin-left:10px">Modifier</span><button data-m="-1">−</button><strong id="trayMod">0</strong><button data-m="1">+</button>
+  </div>
+  <div class="trayrow"><strong id="trayNotation" class="traynote">1D20</strong><span id="trayResult" class="muted"></span></div>
+  <input id="trayReason" placeholder="What for? (optional, e.g. Roll to snag the canister)">
+  <div class="row-actions">
+    <button id="trayFun" title="Just roll: nothing is sent">Roll for fun</button>
+    <button id="traySend" class="primary" title="Roll, and the GM narrates the result as your move">Roll and send to the GM</button>
+  </div>
+</div>
 <div id="modal" class="hidden"></div>
 <aside id="drawer">
   <header><h1 id="drawerTitle">Archive</h1><button id="pinBtn" title="Keep this panel open beside the chat">📌</button><button id="closeDrawer" title="Close (Esc)">✕</button></header>
@@ -423,8 +451,8 @@ async function showList() {
   S.slug = null; clearInterval(S.poll);
   history.replaceState(null, "", "/");
   $("title").textContent = "Campaigns";
-  ["back", "rail", "footer"].forEach(id => $(id).classList.add("hidden"));
-  closePanel();
+  ["back", "rail", "footer", "diceBtn"].forEach(id => $(id).classList.add("hidden"));
+  closePanel(); closeTray();
   toggleArt(false);
   setLook(null);
   document.body.dataset.page = "list";
@@ -690,6 +718,7 @@ async function openCampaign(slug) {
   S.data = await api(`/api/campaigns/${slug}`);
   $("title").textContent = S.data.meta.name;
   ["back", "rail", "footer"].forEach(id => $(id).classList.remove("hidden"));
+  $("diceBtn").classList.toggle("hidden", (S.data.table?.dice || "auto") === "none");
   $("newBtn").classList.add("hidden");
   delete document.body.dataset.page;
   setLook(S.data.theme);
@@ -969,12 +998,8 @@ function send() {
   runTurn(`/api/campaigns/${S.slug}/chat`, { content: text }, text);
 }
 // ---- the player rolls the GM's requested dice ------------------------------------------
-function rollDice(id) {
-  if (S.busy) return;
-  const last = S.data.messages[S.data.messages.length - 1];
-  const req = last?.roll_request;
-  if (!req || req.id !== id) return;
-  const d = parseDice(req.dice);
+// The tumble across the screen: land(r) settles the dice on the result, cancel() clears them.
+function diceFly(d) {
   const shown = Math.min(d.count, 6);
   const fly = document.createElement("div");
   fly.className = "dicefly";
@@ -984,22 +1009,78 @@ function rollDice(id) {
   const flicker = setInterval(() => faces.forEach(t => t.textContent = 1 + Math.floor(Math.random() * d.sides)), 70);
   const t0 = Date.now();
   let settled = false;
-  const land = (r) => {
-    if (settled) return; settled = true;
-    setTimeout(() => {
-      clearInterval(flicker);
-      faces.forEach((t, i) => t.textContent = r.rolls[i] ?? "");
-      const banner = fly.querySelector(".banner");
-      const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
-      banner.textContent = `${r.rolls.length > 1 || r.modifier ? r.rolls.join(" + ") + mod + " = " : ""}${r.total}` +
-        ("success" in r ? (r.success ? "  ✓ success" : "  ✗ failure") : "");
-      banner.classList.add("show", ...("success" in r ? [r.success ? "ok" : "fail"] : []));
-      setTimeout(() => { fly.classList.add("fade"); setTimeout(() => fly.remove(), 600); }, 1800);
-    }, Math.max(0, 1250 - (Date.now() - t0)));
+  return {
+    land(r) {
+      if (settled) return; settled = true;
+      setTimeout(() => {
+        clearInterval(flicker);
+        faces.forEach((t, i) => t.textContent = r.rolls[i] ?? "");
+        const banner = fly.querySelector(".banner");
+        const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
+        banner.textContent = `${r.rolls.length > 1 || r.modifier ? r.rolls.join(" + ") + mod + " = " : ""}${r.total}` +
+          ("success" in r ? (r.success ? "  ✓ success" : "  ✗ failure") : "");
+        banner.classList.add("show", ...("success" in r ? [r.success ? "ok" : "fail"] : []));
+        setTimeout(() => { fly.classList.add("fade"); setTimeout(() => fly.remove(), 600); }, 1800);
+      }, Math.max(0, 1250 - (Date.now() - t0)));
+    },
+    cancel() { if (!settled) { settled = true; clearInterval(flicker); fly.remove(); } },
   };
-  runTurn(`/api/campaigns/${S.slug}/roll`, { id }, `🎲 ${req.prompt}…`, "roll", { rolled: (e) => land(e.roll) })
-    .finally(() => { if (!settled) { clearInterval(flicker); fly.remove(); } });
 }
+function rollDice(id) {
+  if (S.busy) return;
+  const last = S.data.messages[S.data.messages.length - 1];
+  const req = last?.roll_request;
+  if (!req || req.id !== id) return;
+  const fly = diceFly(parseDice(req.dice));
+  runTurn(`/api/campaigns/${S.slug}/roll`, { id }, `🎲 ${req.prompt}…`, "roll", { rolled: (e) => fly.land(e.roll) })
+    .finally(() => fly.cancel());
+}
+
+// ---- dice tray: any dice, for fun or as your move ------------------------------------------
+const TRAY = { sides: 20, count: 1, mod: 0 };
+function trayNotation() { return `${TRAY.count}D${TRAY.sides === 100 ? 100 : TRAY.sides}${TRAY.mod ? (TRAY.mod > 0 ? "+" : "") + TRAY.mod : ""}`; }
+function drawTray() {
+  $("traySides").innerHTML = [4, 6, 8, 10, 12, 20, 100].map(n =>
+    `<button data-s="${n}" class="${n === TRAY.sides ? "on" : ""}" title="d${n}">${dieSVG(n, n === 100 ? "%" : n)}</button>`).join("");
+  $("traySides").querySelectorAll("[data-s]").forEach(b => b.onclick = () => { TRAY.sides = +b.dataset.s; drawTray(); });
+  $("trayCount").textContent = TRAY.count;
+  $("trayMod").textContent = TRAY.mod > 0 ? "+" + TRAY.mod : TRAY.mod;
+  $("trayNotation").textContent = trayNotation();
+  $("traySend").disabled = S.busy;
+}
+function openTray() {
+  if (!$("tray").classList.contains("hidden")) return closeTray();
+  // the GM is waiting on a roll: start from its dice and reason
+  const req = S.data?.messages?.[S.data.messages.length - 1]?.roll_request;
+  if (req) {
+    const d = parseDice(req.dice);
+    Object.assign(TRAY, { sides: d.sides, count: d.count, mod: d.mod });
+    $("trayReason").value = req.prompt || "";
+  }
+  $("trayResult").textContent = "";
+  drawTray();
+  $("tray").classList.remove("hidden");
+}
+function closeTray() { $("tray").classList.add("hidden"); }
+document.querySelectorAll("#tray [data-n]").forEach(b => b.onclick = () => { TRAY.count = Math.min(10, Math.max(1, TRAY.count + +b.dataset.n)); drawTray(); });
+document.querySelectorAll("#tray [data-m]").forEach(b => b.onclick = () => { TRAY.mod = Math.min(20, Math.max(-20, TRAY.mod + +b.dataset.m)); drawTray(); });
+$("trayClose").onclick = closeTray;
+$("diceBtn").onclick = openTray;
+$("trayFun").onclick = () => {
+  const rolls = Array.from({ length: TRAY.count }, () => 1 + Math.floor(Math.random() * TRAY.sides));
+  const r = { dice: trayNotation(), rolls, modifier: TRAY.mod, total: rolls.reduce((a, b) => a + b, 0) + TRAY.mod };
+  diceFly({ count: TRAY.count, sides: TRAY.sides }).land(r);
+  $("trayResult").textContent = ` → ${r.rolls.join(" + ")}${r.modifier ? (r.modifier > 0 ? " + " : " − ") + Math.abs(r.modifier) : ""} = ${r.total} (just for fun)`;
+};
+$("traySend").onclick = () => {
+  if (S.busy) return;
+  const reason = $("trayReason").value.trim();
+  const fly = diceFly({ count: TRAY.count, sides: TRAY.sides });
+  closeTray();
+  $("trayReason").value = "";
+  runTurn(`/api/campaigns/${S.slug}/roll-free`, { dice: trayNotation(), reason }, `🎲 ${reason || trayNotation()}…`, "roll",
+          { rolled: (e) => fly.land(e.roll) }).finally(() => fly.cancel());
+};
 
 function regenerate() {
   S.data.messages = S.data.messages.slice(0, -1);
@@ -1388,6 +1469,7 @@ $("artBtn").onclick = () => toggleArt();
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && document.body.dataset.viewart) { e.preventDefault(); toggleArt(false); return; }
   if (e.key !== "Escape" || !S.slug) return;
+  if (!$("tray").classList.contains("hidden")) { e.preventDefault(); closeTray(); return; }
   if (S.busy) { e.preventDefault(); cancelTurn(); }
   else if (S.editing) { e.preventDefault(); $("input").value = ""; autosize(); stopEditing(); }
   else if (PANEL && $("modal").classList.contains("hidden") && !($("drawer").contains(document.activeElement) && /INPUT|TEXTAREA/.test(document.activeElement.tagName))) { e.preventDefault(); closePanel(); }

@@ -509,3 +509,8 @@ Return JSON:
 - prompt: an image prompt of 40-70 words for a head-and-shoulders portrait: the appearance,
   expression and pose, plus a hint of a background from their world. Visual description only:
   no names, no story, no text in the image."""
+
+ROLL_REPAIR = """\
+[GM NOTES] Your reply asks the player to roll, but you didn't call request_roll, so no dice
+appeared. Call request_roll now for exactly that roll: the dice with the character's modifier,
+a short prompt, and the target. Only the tool call; no text."""

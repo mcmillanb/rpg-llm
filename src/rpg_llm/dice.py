@@ -178,3 +178,43 @@ def request_from_text(text: str, key: str) -> dict | None:
         req["success_if"] = "at_most" if re.search(r"or less|or under|at most|below", m.group(2) or "", re.I) \
             else "at_least"
     return req
+
+
+# The GM asked for a roll in words only ("Roll to snag the canister."), with no dice at all.
+_ASK = re.compile(r"^\W*(?:please\s+|now,?\s+|go ahead and\s+)?(?:roll\b|make\s+an?\b.{0,40}\b(?:roll|check|"
+                  r"test|save)\b|give me\s+an?\b.{0,40}\b(?:roll|check)\b|time for\s+an?\b.{0,40}\broll\b)",
+                  re.I)
+
+
+def asked_roll(text: str) -> str | None:
+    """The closing paragraph, if it asks the player to roll: 'Roll to snag the canister.'"""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+    if not paras:
+        return None
+    last = paras[-1].strip("*_ ")
+    return last if len(last) <= 250 and _ASK.search(last) else None
+
+
+def standard_dice(system: str) -> dict:
+    """The system's usual task roll, for when the GM didn't say which dice."""
+    s = (system or "").lower()
+    if any(k in s for k in ("traveller", "cepheus", "2d6")):
+        return {"dice": "2D6", "target": 8, "success_if": "at_least"}
+    if "gurps" in s:
+        return {"dice": "3D6"}
+    if roll_under_system(s):
+        return {"dice": "1D100"}
+    if any(k in s for k in ("blades", "forged", "powered by the apocalypse", "apocalypse", "dungeon world")):
+        return {"dice": "2D6"}
+    return {"dice": "1D20"}
+
+
+def standard_request(ask: str, system: str, key: str) -> dict:
+    """A request built from the GM's words and the system's usual roll."""
+    goal = re.sub(r"\s+", " ", ask).strip().rstrip(".!:")
+    if len(goal) > 80:
+        goal = goal[:80].rsplit(" ", 1)[0] + "…"
+    req = {"id": "t" + hashlib.sha1(f"{key}:{ask}".encode()).hexdigest()[:11],
+           "prompt": goal if goal.lower().startswith("roll") else f"Roll: {goal}",
+           "from_text": True, "standard": True, **standard_dice(system)}
+    return req

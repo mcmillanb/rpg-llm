@@ -1026,3 +1026,54 @@ def test_an_empty_reply_is_asked_again_once(tmp_path):
         sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "I pick the lock"}))
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
         assert msgs[-1]["content"] == "The lock gives." and msgs[-1]["stats"]["empty_retry"]
+
+
+def test_a_roll_asked_in_words_gets_dice():
+    reply = "Darrow lets the net drop.\n\nRoll to snag the military canister with Darrow's grappling net."
+    ask = dice.asked_roll(reply)
+    assert ask and dice.asked_roll("You roll your shoulders and wait.") is None
+    req = dice.standard_request(ask, "Traveller (Third Imperium)", "243")
+    assert (req["dice"], req["target"]) == ("2D6", 8)
+    assert req["prompt"] == "Roll to snag the military canister with Darrow's grappling net"
+    assert dice.standard_request(ask, "Call of Cthulhu 7e", "1")["dice"] == "1D100"
+    assert dice.standard_request(ask, "D&D 5e", "1")["dice"] == "1D20"
+
+
+def _virtual_game(tmp_path, rounds):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    dm = FakeLLM(stream_rounds=rounds)
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)]), archiver=FakeLLM())
+    return rt, dm
+
+
+def test_worded_roll_is_repaired_by_a_forced_tool_call(tmp_path):
+    rt, dm = _virtual_game(tmp_path, [
+        [{"content": "The net sinks.\n\nRoll to snag the canister."}],
+        [{"tool_calls": [{"id": "1", "name": "request_roll",
+                          "arguments": '{"dice": "2D6+1", "prompt": "Roll to snag the canister", "target": 8}'}]}],
+    ])
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "system": "Traveller",
+                                                   "dice": "virtual"}).json()["slug"]
+        sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "Drop the net"}))
+        last = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]
+        assert (last["roll_request"]["dice"], last["roll_request"]["target"]) == ("2D6+1", 8)
+        assert "request_roll" in dm.calls[-1][1][-1]["content"]
+
+
+def test_worded_roll_falls_back_to_the_standard_roll_and_free_rolls_work(tmp_path):
+    rt, dm = _virtual_game(tmp_path, [
+        [{"content": "The net sinks.\n\nRoll to snag the canister."}], [],
+        [{"content": "You hook it."}],
+    ])
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "T", "system": "Traveller",
+                                                   "dice": "virtual"}).json()["slug"]
+        sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "Drop the net"}))
+        req = client.get(f"/api/campaigns/{slug}").json()["messages"][-1]["roll_request"]
+        assert (req["dice"], req["target"], req["standard"]) == ("2D6", 8, True)
+        assert client.post(f"/api/campaigns/{slug}/roll-free", json={"dice": "banana"}).status_code == 400
+        sse_events(client.post(f"/api/campaigns/{slug}/roll-free", json={"dice": "3d6", "reason": "Luck"}))
+        msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
+        assert msgs[-2]["roll"]["dice"] == "3D6" and msgs[-2]["content"].startswith("🎲 Luck: 3D6")
+        assert msgs[-1]["content"] == "You hook it."

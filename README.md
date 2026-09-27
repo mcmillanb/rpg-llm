@@ -20,7 +20,8 @@ Each campaign also has:
 - **Table settings,** chosen when you create it: consequences (low-stakes / normal / brutal)
   and dice (rolled by the app and shown in the story / **you roll dice on screen**: the GM sets
   up the moment and asks for a roll, you click the dice, they tumble across the screen, and the
-  GM narrates what your roll achieved / you roll your own physical dice / no dice). Auto dice
+  GM narrates what your roll achieved / you roll your own physical dice / no dice). A 🎲 dice
+  tray by the message box rolls any dice, just for fun or sent to the GM as your move. Auto dice
   are real random rolls the GM asks for through a tool; it narrates from the result and can't
   invent one. **Rewinds** (editing your last move or re-rolling the GM's reply after seeing it)
   are off by default; you can always take a message back while the GM is still replying (Esc).

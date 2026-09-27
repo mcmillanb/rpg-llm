@@ -12,8 +12,8 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import (admin, arc, cast, compactor, context, dice, images, panels, portrait, router,
-                     sheet, suggest, themes, wiki)
+from rpg_llm import (admin, arc, cast, compactor, context, dice, images, panels, portrait,
+                     prompts, router, sheet, suggest, themes, wiki)
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -356,6 +356,11 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
             requested, entry["content"] = pasted
         else:
             requested = dice.request_from_text(content, f"{user['id']}")
+        ask = None if requested else dice.asked_roll(content)
+        if ask:  # asked in words only: have the GM fill in the request, else the usual roll
+            yield sse({"type": "status", "text": "setting up the dice…"})
+            requested = await repair_roll(rt, c, convo, content) or \
+                dice.standard_request(ask, c.meta.get("system") or "", f"{user['id']}")
     if requested:
         entry["roll_request"] = requested
     if supersedes:
@@ -428,12 +433,38 @@ class RollIn(BaseModel):
     id: str
 
 
+class FreeRollIn(BaseModel):
+    dice: str
+    reason: str = ""
+
+
 class PremiseAsk(BaseModel):
     system: str = ""
     tone: str = ""
     style: str = ""
     seed: str = ""
     avoid: list[str] = []
+
+
+async def repair_roll(rt: Runtime, c: Campaign, convo: list[dict], reply: str) -> dict | None:
+    """The GM asked for a roll in words but didn't call request_roll: one short, forced tool
+    call so the dice, modifier and target come from the GM, who knows the character."""
+    ask = convo + [{"role": "assistant", "content": reply},
+                   {"role": "user", "content": prompts.ROLL_REPAIR}]
+    try:
+        async def call():
+            async for d in rt.dm.stream(ask, tools=[dice.REQUEST_TOOL], tool_choice="required",
+                                        extra_body=NO_THINKING, max_tokens=300):
+                if "tool_calls" in d:
+                    for tc in d["tool_calls"]:
+                        if tc["name"] == "request_roll":
+                            return dice.request(json.loads(tc["arguments"] or "{}"),
+                                                dice.roll_under_system(c.meta.get("system") or ""))
+            return None
+        return await asyncio.wait_for(call(), timeout=60)
+    except Exception:
+        log.exception("couldn't get the roll request from the GM")
+        return None
 
 
 def can_rewind(c: Campaign) -> bool:
@@ -451,9 +482,14 @@ def pending_roll(c: Campaign, msgs: list[dict]) -> dict | None:
     if last.get("roll_request"):
         return last["roll_request"]
     if context.table(c.meta)["dice"] == "virtual":
-        pasted = dice.request_from_args_text(last.get("content", ""), str(last["id"]))
-        return pasted[0] if pasted else dice.request_from_text(last.get("content", ""),
-                                                               str(last["id"]))
+        text = last.get("content", "")
+        pasted = dice.request_from_args_text(text, str(last["id"]))
+        if pasted:
+            return pasted[0]
+        req = dice.request_from_text(text, str(last["id"]))
+        ask = None if req else dice.asked_roll(text)
+        return req or (dice.standard_request(ask, c.meta.get("system") or "", str(last["id"]))
+                       if ask else None)
     return None
 
 
@@ -806,6 +842,20 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         if not req or req["id"] != body.id:
             raise HTTPException(409, "That roll isn't waiting any more.")
         r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"))
+        entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})
+        return stream_turn(rt, c, first={"type": "rolled", "roll": r, "message": entry})
+
+    @app.post("/api/campaigns/{slug}/roll-free")
+    async def free_roll(slug: str, body: FreeRollIn):
+        """The player rolls dice of their own choosing from the dice tray and tells the GM: the
+        roll is their move, and the GM narrates it."""
+        rt = R()
+        rt.require_configured()
+        c = rt.campaign(slug)
+        try:
+            r = dice.roll(body.dice, body.reason.strip()[:120])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})
         return stream_turn(rt, c, first={"type": "rolled", "roll": r, "message": entry})
 
