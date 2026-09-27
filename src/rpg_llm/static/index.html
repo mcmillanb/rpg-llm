@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>RPG LLM</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
 <style>
@@ -36,7 +36,12 @@ header { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-it
 header a { color: inherit; text-decoration: none; }
 header h1 { font-size: 17px; margin: 0; flex: 1; min-width: 0; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
-#app { display: flex; flex-direction: column; height: 100%; }
+#app { display: flex; flex-direction: column; height: 100%; height: var(--app-h, 100dvh); }
+/* the on-screen keyboard: the page is sized to what's visible (see fitViewport), and on a
+   phone the status/icon row steps aside while typing so the message box has room */
+html.kbd, html.kbd body { overflow: hidden; }
+html.kbd #app { position: fixed; left: 0; right: 0; top: 0; transform: translateY(var(--app-top, 0px)); }
+@media (max-width: 900px) { html.kbd .footrow, html.kbd #artBtn { display: none; } }
 main { flex: 1; overflow-y: auto; }
 .wrap, .footwrap { width: 80%; margin: 0 auto; padding: 16px; }
 @media (max-width: 900px) { .wrap, .footwrap { width: 100%; } }
@@ -356,7 +361,7 @@ body[data-look] #tray { backdrop-filter: blur(10px); }
     <div class="footwrap">
       <div class="footrow"><div id="statusline" class="ui muted"></div><span id="railSlot"></span></div>
       <div class="composer">
-        <textarea id="input" rows="1" placeholder="What do you do?  (Esc stops a reply and takes your message back · ↑ edits your last message)"></textarea>
+        <textarea id="input" rows="1" autocomplete="off" enterkeyhint="send" placeholder="What do you do?  (Esc stops a reply and takes your message back · ↑ edits your last message)"></textarea>
         <button id="diceBtn" class="hidden" title="Dice tray: roll any dice, for fun or for the GM" aria-label="Dice tray">🎲</button>
         <button id="artBtn" class="hidden" title="View the artwork (click again, or Esc, to bring the messages back)" aria-label="View the artwork">👁</button>
         <button id="send" class="primary">Send</button>
@@ -1546,6 +1551,36 @@ async function renderArchive() {
     S.data = await api(`/api/campaigns/${S.slug}`); renderChat(false); renderArchive();
   };
 }
+
+// ---- on-screen keyboard ------------------------------------------------------------------------
+// Mobile Safari lays the keyboard (and its suggestion bar) over the page instead of shrinking it,
+// hiding the message box. Size the app to the visible part of the screen while it's open.
+// On touch screens the keyboard shortcuts in the placeholder don't apply, and it wraps.
+if (matchMedia("(pointer: coarse)").matches) $("input").placeholder = "What do you do?";
+(function fitViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement;
+  const fit = () => {
+    // a keyboard: much less visible height, not a toolbar wobble or a pinch-zoom
+    const open = Math.abs(vv.scale - 1) < 0.05 && window.innerHeight - vv.height > 120;
+    root.classList.toggle("kbd", open);
+    if (open) {
+      root.style.setProperty("--app-h", vv.height + "px");
+      root.style.setProperty("--app-top", vv.offsetTop + "px");
+    } else {
+      root.style.removeProperty("--app-h");
+      root.style.removeProperty("--app-top");
+    }
+  };
+  vv.addEventListener("resize", fit);
+  vv.addEventListener("scroll", fit);
+  $("input").addEventListener("focus", () => setTimeout(() => {
+    fit();
+    $("input").scrollIntoView({ block: "nearest" });
+    if ($("main").scrollHeight - $("main").scrollTop - $("main").clientHeight < 300) $("main").scrollTop = $("main").scrollHeight;
+  }, 300));
+})();
 
 // ---- wiring --------------------------------------------------------------
 function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; }
