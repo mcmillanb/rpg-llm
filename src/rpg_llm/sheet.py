@@ -139,9 +139,24 @@ def rewind(campaign: Campaign, first_dead_id: int) -> bool:
     return True
 
 
-async def update(campaign: Campaign, router: LLMClient, router_system: str) -> dict | None:
+SYSTEM = "You keep the character records for a solo tabletop role-playing campaign."
+# Money is only touched when the exchange talks about money at all: a reply about something
+# else can't re-apply an earlier payment.
+MONEY_WORDS = re.compile(
+    r"\b(credits?|cr|cash|coins?|gold|silver|copper|gp|sp|cp|dollars?|pounds?|quid|marks?|"
+    r"crowns?|shillings?|pence|thalers?|scrip|money|funds|pay|paid|pays|paying|payment|price|"
+    r"cost|costs|fee|fees|bill|rent|rental|wage|wages|reward|bribe|change|debt|loan|owe|owed|"
+    r"buy|bought|sell|sold|purchase|tip)\b|[$£€¥]", re.I)
+
+
+async def update(campaign: Campaign, router: LLMClient, router_system: str = "") -> dict | None:
     """After a GM reply: apply what the latest exchange concretely changed. Creates the sheet
-    from the brief the first time. Returns {"changes": [...]} if something changed."""
+    from the brief the first time. Returns {"changes": [...]} if something changed.
+
+    The model sees only the sheet and the exchange (plus the brief when there's no sheet yet):
+    with the campaign brief and wiki index in front of it, the model (9B or 27B) mixed their
+    money figures and story into the update (a quote booked as a payment, an earlier payment
+    applied again). `router_system` is accepted for older callers and ignored."""
     messages = campaign.messages()
     if len(messages) < 2 or messages[-1]["role"] != "assistant":
         return None
@@ -157,12 +172,15 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str) -> d
         sheet=yaml.safe_dump(current, sort_keys=False, allow_unicode=True) if current
         else "(no sheet yet: create it from the brief and this exchange)",
         exchange=exchange, earlier=earlier)
-    result = await router.json([{"role": "system", "content": router_system},
+    system = SYSTEM if current else f"{SYSTEM}\n\nCampaign brief:\n{campaign.brief.strip()}"
+    result = await router.json([{"role": "system", "content": system},
                                 {"role": "user", "content": task}],
                                UPDATE_SCHEMA, max_tokens=1500)
     if campaign.messages()[-1]["id"] != messages[-1]["id"]:
         return None  # the turn was taken back meanwhile
     new = guard(current, clean(result.get("sheet") or {}))
+    if current and new["money"] != current["money"] and not MONEY_WORDS.search(exchange):
+        new["money"] = current["money"]  # nothing about money in this exchange
     if current is not None and (not result.get("changed") or new == current):
         return None
     if not new.get("name") and current is None:

@@ -109,8 +109,7 @@ class Runtime:
                 st["error"] = f"scene tracking: {e}"
             try:
                 async with self.lock(c.slug):
-                    changed = await sheet.update(c, self.router,
-                                                 router.router_system(c, c.load_state()))
+                    changed = await sheet.update(c, self.router)
                 if changed:
                     st["last_sheet"] = {**changed, "at": time.time()}
             except Exception as e:

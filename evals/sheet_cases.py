@@ -97,6 +97,25 @@ THEIRS = ("Pull it up",
           "you: military surplus that could easily be worth more than the fifty credits Darrow just "
           "earned for the tow.")
 
+RENTAL_QUOTE = ("4 days of crawler hire, i cant afford the week",
+                "Marta taps her chin. \"I can squeeze four days out of the schedule for you. That'll be "
+                "**60 credits a day**.\" She slides a worn contract across the counter and rests her hand "
+                "on it. \"**240 credits total.** That leaves you with enough for fuel and instant coffee. "
+                "Do we have a deal?\"")
+NO_MONEY_AFTER_PAY = [("I hand over the valve",
+                       "Kess reaches into his drawer and slides a neat stack of twenty credits across the "
+                       "desk toward you. \"Good work.\""),
+                      ("TBH, I'm struggling to get the ship out, any suggestions?",
+                       "Kess leans back. \"Marta is solid. She rents out clean gear and keeps her mouth "
+                       "shut. Or there's a salvage contractor down at the scrap yards.\" Do you want his "
+                       "contact, or will you trust Marta?")]
+PAID_DARROW = ("Head outside and give Darrow 100cr, \"That's half the value of the cells, I decided to keep "
+               "one for myself, so I only got 30cr and kept the cell\" Then head out to find the valve",
+               "You step outside where Darrow is leaning against a crate. You press the stack of credits "
+               "into his hand. \"That's half the value of the cells,\" you say. \"I decided to keep one "
+               "for myself.\" Darrow counts it and claps you on the shoulder. You climb back into the "
+               "truck and head for Secondary Road 4.")
+
 
 CASES = [
     ("found and kept: cells in gear", FOUND,
@@ -107,6 +126,10 @@ CASES = [
     # correction is applied
     ("a correction adds only the difference", CORRECTED,
      lambda s: money(s) == 415),
+    ("a rental quoted: not paid until agreed", RENTAL_QUOTE, lambda s: money(s) == 204),
+    ("the previous payment isn't applied again", NO_MONEY_AFTER_PAY, lambda s: money(s) == 224),
+    ("paid Darrow his share, kept the cell", PAID_DARROW,
+     lambda s: money(s) == 104 and has(s["gear"], "cell") and not has(s["obligations"], "darrow")),
     ("paid on delivery: nothing yet", ON_DELIVERY, lambda s: money(s) == 204),
     ("someone else's money isn't yours", THEIRS, lambda s: money(s) == 204),
     ("a price offered: no sale yet", OFFERED,
@@ -128,6 +151,11 @@ async def run_case(llm, exchange) -> dict:
     c = Vault(tmp).create("Case", premise="Callen Vane, a veteran pilot, digs out a buried starship.")
     sheet.save(c, START, 0, "start")
     pairs = exchange if isinstance(exchange, list) else [exchange]
+    if exchange is NO_MONEY_AFTER_PAY:  # the valve payment is already on the sheet
+        sheet.save(c, {**START, "money": "224 Cr"}, 0, "start")
+        c.append({"role": "user", "content": pairs[0][0]})
+        c.append({"role": "assistant", "content": pairs[0][1]})
+        pairs = pairs[1:]
     if exchange is CORRECTED:  # start with the first exchange already applied
         sheet.save(c, {**START, "money": "404 Cr",
                        "gear": [g for g in START_GEAR if "cell" not in g] + ["1 military-grade power cell"]},

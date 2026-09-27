@@ -1135,3 +1135,14 @@ def test_a_thin_portrait_is_repainted_once_details_arrive(vault):
     assert portrait.needs_paint(c, fuller, idx, done)
     portrait.add_person(c, ["Old man Miller"], b"y", portrait.detail(fuller))
     assert not portrait.needs_paint(c, fuller, portrait.people_index(c), portrait.painted(c))
+
+
+async def test_sheet_money_only_changes_when_the_exchange_is_about_money(vault):
+    c = vault.create("T")
+    sheet.save(c, {"name": "Callen", "money": "259 Cr"}, 0, "x")
+    play(c, ("Any advice on digging out the ship?", "Kess suggests Marta; she rents clean gear."))
+    llm = FakeLLM([{"changes": ["Received 20 Cr"], "changed": True,
+                    "sheet": {**sheet.blank(), "name": "Callen", "money": "279 Cr"}}])
+    await sheet.update(c, llm)
+    assert sheet.load(c)["money"] == "259 Cr"
+    assert llm.calls[0][1][0]["content"] == sheet.SYSTEM  # no brief or wiki once a sheet exists

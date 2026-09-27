@@ -407,9 +407,12 @@ Not yet: these change nothing until the story shows them done.
 Counting:
 - Selling, using or giving away some of a stack changes the count; the rest stays on the sheet
   ("3 power cells", sells 2 -> "1 power cell").
-- A correction to an amount already on the sheet (the player points out the total should be
-  211, not 200) changes it by the difference only (+11). Never apply the same payment twice:
-  the previous exchange below is already on the sheet.
+- A correction to an amount already on the sheet changes it by the difference only. Example:
+  the previous exchange paid 200 and the sheet already shows 404; now the player points out it
+  should have been 211, so the money becomes 404 + 11 = 415, not 404 + 211. Never apply the same
+  payment twice: the previous exchange below is already on the sheet.
+- An order or arrangement for later (goods to collect, a job to do, money to pay someone) goes
+  in obligations, so it isn't forgotten.
 
 Keep each list to the dozen most important entries. When in doubt, leave it off the sheet:
 the story itself is recorded elsewhere.
