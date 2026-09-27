@@ -21,6 +21,7 @@ from rpg_llm.vault import Campaign, Vault
 log = logging.getLogger("rpg_llm")
 STATIC = Path(__file__).parent / "static"
 MAX_TOOL_ROUNDS = 5
+PAUSE_MIN_SCENES = 2  # filing during play waits for this many closed scenes
 QUIET_SECONDS = 180  # background filing waits until the player has been quiet this long
 QUIET_POLL = 5
 # Condensing the live tail rewrites the start of the prompt, so the next turn re-reads it once.
@@ -226,14 +227,28 @@ class Runtime:
         finally:
             st["compacting"] = False
 
+    def waiting_scenes(self, c: Campaign) -> int:
+        """Closed scenes not filed yet."""
+        return sum(s.status == "closed_provisional" for s in c.load_state().scenes[:-1])
+
     def maybe_compact_idle(self, c: Campaign) -> None:
-        """Start background filing once play has stopped for the idle time and nobody is at
-        the campaign right now (opening it after a long break doesn't trigger it at once)."""
+        """Start background filing when play has paused: after the idle time with anything
+        waiting, or during play after a few quiet minutes once two scenes are waiting (batched,
+        because the first reply after a filing re-reads its prompt once). Never while the
+        player is at the campaign or a turn or its follow-up work is running; it also pauses
+        again as soon as the player comes back."""
         last = c.last_activity()
-        hours = self.settings.tuning.idle_compact_hours
-        idle = last is not None and time.time() - last > hours * 3600
-        if (idle and not self.player_active(c.slug) and not self.st(c.slug)["compacting"]
-                and self.needs_compaction(c)):
+        st = self.st(c.slug)
+        if (last is None or self.player_active(c.slug) or st["compacting"] or st["tracking"]
+                or c.slug in self.casting):
+            return
+        t = self.settings.tuning
+        quiet = time.time() - last
+        waiting = self.waiting_scenes(c)
+        idle = quiet > t.idle_compact_hours * 3600 and waiting >= 1
+        paused = (t.pause_compact_minutes > 0 and quiet > t.pause_compact_minutes * 60
+                  and waiting >= PAUSE_MIN_SCENES)
+        if idle or paused:
             self.spawn(self.run_compact(c, background=True))
 
     async def idle_loop(self) -> None:

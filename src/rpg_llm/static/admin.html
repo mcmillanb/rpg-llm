@@ -157,6 +157,8 @@ pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; 
         <div><label>Scene-change confidence threshold (0–1)</label><input id="t_router_threshold" type="number" min="0" max="1" step="0.05">
           <div class="muted">Higher: fewer, surer scene breaks.</div></div>
         <div><label>File finished scenes after this many idle hours</label><input id="t_idle_compact_hours" type="number" min="0" step="0.5"></div>
+        <div><label>Also file during play after this many quiet minutes</label><input id="t_pause_compact_minutes" type="number" min="0" step="1">
+          <div class="muted">Once two scenes are waiting. 0: only after the idle hours.</div></div>
         <div><label>Archive check timeout before each turn (seconds)</label><input id="t_gatekeeper_timeout" type="number" min="1" step="1"></div>
       </div>
       <label class="inline" style="margin-top:14px"><input type="checkbox" id="t_gatekeeper_enabled">
@@ -386,7 +388,7 @@ function renderRoles() {
 }
 
 // ---- tuning / password -------------------------------------------------------
-const TUNE = ["live_tail_pct", "router_threshold", "idle_compact_hours", "gatekeeper_timeout"];
+const TUNE = ["live_tail_pct", "router_threshold", "idle_compact_hours", "pause_compact_minutes", "gatekeeper_timeout"];
 function renderTuning() {
   for (const k of TUNE) { $("t_" + k).value = CFG.tuning[k]; $("t_" + k).oninput = (e) => { CFG.tuning[k] = +e.target.value; markDirty(); }; }
   $("t_gatekeeper_enabled").checked = CFG.tuning.gatekeeper_enabled;

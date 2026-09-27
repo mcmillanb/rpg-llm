@@ -1497,11 +1497,20 @@ async function renderJournal() {
     ${d.situation || d.threads ? `<p class="muted small">As of scene ${d.as_of}, the last one filed${d.unfiled > 2 ? `; the ${d.unfiled} scenes since are filed after a break in play` : ""}.</p>` : ""}
     ${d.earlier ? `<details ${d.unfiled > 2 ? "open" : ""}><summary><strong>Earlier this session</strong> <span class="muted">(condensed)</span></summary><div class="drawer-md">${md(d.earlier)}</div></details>` : ""}
     <h3>The story so far</h3>
+    ${d.waiting ? `<p class="muted small">${d.waiting} finished scene${d.waiting > 1 ? "s are" : " is"} waiting to be filed (it happens in quiet moments). <a id="fileNow">File now</a> <span id="fileMsg"></span></p>` : ""}
     ${story.length ? story.map(s => `<div class="pcard">
       <div class="ptop"><span class="pname">Scene ${s.scene}${s.title ? ": " + esc(s.title) : ""}</span>${s.live ? `<span class="muted small">in play</span>` : ""}</div>
       ${s.location ? `<div class="pline muted">${esc(s.location)}</div>` : ""}
       ${s.summary ? `<div class="pline">${esc(s.summary)}</div>` : ""}</div>`).join("") : `<p class="muted">Nothing yet.</p>`}`;
   $("saveSheet").onclick = () => saveSheetFields(ch.sheet || {}, renderJournal);
+  $("fileNow")?.addEventListener("click", async () => {
+    $("fileNow").remove(); $("fileMsg").textContent = "Filing… (about a minute a scene)";
+    startPoll();
+    try { await api(`/api/campaigns/${S.slug}/compact`, { method: "POST" }); }
+    catch (e) { $("fileMsg").textContent = e.message; return; }
+    S.data = await api(`/api/campaigns/${S.slug}`); renderChat(false); refreshSigs();
+    if (PANEL === "journal") renderJournal();
+  });
 }
 
 // ---- archive: how the GM's memory works (for the curious) --------------------------------------

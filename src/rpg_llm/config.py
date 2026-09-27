@@ -81,7 +81,10 @@ class Tuning(BaseModel):
     router_threshold: float = Field(0.7, ge=0, le=1)
     gatekeeper_enabled: bool = True
     gatekeeper_timeout: float = Field(30.0, ge=1)
-    idle_compact_hours: float = Field(6.0, ge=0)
+    idle_compact_hours: float = Field(0.5, ge=0)
+    # also file during play, once this many minutes pass without a message and at least two
+    # scenes are waiting (0 = only after the idle time above)
+    pause_compact_minutes: float = Field(5.0, ge=0)
 
 
 class AppConfig(BaseModel):

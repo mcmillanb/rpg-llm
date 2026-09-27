@@ -76,6 +76,7 @@ def journal(campaign: Campaign) -> dict:
             "earlier": earlier,
             "as_of": max((s.id for s in state.scenes if s.status == "compacted"), default=0),
             "unfiled": sum(s.status != "compacted" for s in state.scenes),
+            "waiting": sum(s.status == "closed_provisional" for s in state.scenes[:-1]),
             "story": story}
 
 

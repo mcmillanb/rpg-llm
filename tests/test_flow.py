@@ -1096,3 +1096,24 @@ def test_names_copied_with_list_formatting_are_cleaned():
                                aliases=["B. Kess (aka Kess)", "Kess"]),
                         person("Marta (she)", pronouns="she", aliases=["Marta (aka Marta (she))"])], 5)
     assert [(p["name"], p["aliases"]) for p in people] == [("B. Kess", ["Kess"]), ("Marta", [])]
+
+
+def test_filing_starts_in_a_pause_once_two_scenes_wait(tmp_path, monkeypatch):
+    import time as time_mod
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()),
+                 dm=FakeLLM(), router_llm=FakeLLM(), archiver=FakeLLM())
+    started = []
+    monkeypatch.setattr(rt, "spawn", lambda coro: (started.append(1), coro.close()))
+    c = rt.vault.create("T")
+    play(c, ("a", "A"), ("b", "B"), ("c", "C"))
+    c.save_state(State(scenes=[Scene(1, 1, "closed_provisional"), Scene(2, 3)]))
+    rt.maybe_compact_idle(c)
+    assert not started  # just played
+    later = time_mod.time() + 6 * 60
+    monkeypatch.setattr("rpg_llm.app.time.time", lambda: later)
+    rt.maybe_compact_idle(c)
+    assert not started  # a 6-minute pause, but only one scene waiting
+    c.save_state(State(scenes=[Scene(1, 1, "closed_provisional"), Scene(2, 3, "closed_provisional"),
+                               Scene(3, 5)]))
+    rt.maybe_compact_idle(c)
+    assert started == [1]
