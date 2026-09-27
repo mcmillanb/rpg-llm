@@ -4,7 +4,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from rpg_llm import cast, compactor, context, dice, panels, router, sheet, wiki
+from rpg_llm import cast, compactor, context, dice, panels, portrait, router, sheet, wiki
 from rpg_llm.app import Runtime, create_app
 from rpg_llm.config import AppConfig, Env, Settings, Tuning
 from rpg_llm.vault import Scene, State, Vault
@@ -1077,3 +1077,13 @@ def test_worded_roll_falls_back_to_the_standard_roll_and_free_rolls_work(tmp_pat
         msgs = client.get(f"/api/campaigns/{slug}").json()["messages"]
         assert msgs[-2]["roll"]["dice"] == "3D6" and msgs[-2]["content"].startswith("🎲 Luck: 3D6")
         assert msgs[-1]["content"] == "You hook it."
+
+
+def test_people_portraits_are_kept_by_every_name(vault):
+    c = vault.create("Test", system="Traveller")
+    f = portrait.add_person(c, ["B. Kess", "Kess"], b"webp")
+    assert portrait.person_file(portrait.people_index(c), ["kess"]) == f == "b-kess-01.webp"
+    assert portrait.add_person(c, ["B. Kess", "Kess"], b"webp2") == "b-kess-02.webp"
+    prompt = portrait.person_prompt({"pronouns": "he", "role": "freight broker", "look": "grey beard"},
+                                    "Traveller")
+    assert prompt.startswith("A man, freight broker. Appearance: grey beard.")

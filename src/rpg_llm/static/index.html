@@ -240,9 +240,20 @@ label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 @media (max-width: 620px) { .portraitbox { flex-direction: column; } }
 .urow { display: flex; gap: 10px; align-items: flex-start; margin-left: 12%; }
 .urow .msg.user { margin-left: 0; flex: 1; min-width: 0; }
-.avatar { width: 44px; height: 44px; border-radius: 50%; margin-top: 14px; flex: none;
-  object-fit: cover; border: 1px solid var(--line); cursor: pointer; }
-@media (max-width: 620px) { .urow { margin-left: 4%; } .avatar { width: 32px; height: 32px; } }
+/* avatars: yours beside your messages, the people in a GM message beside it; a light ring
+   makes them stand out against the backdrop */
+.avatar, .npcs img { border-radius: 50%; object-fit: cover; cursor: pointer; flex: none;
+  padding: 3px; background: #f7f4ee; border: 1px solid rgba(0,0,0,.12);
+  box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.avatar { width: 51px; height: 51px; margin-top: 14px; }  /* a one-line message's height */
+.msg.assistant { position: relative; }
+.npcs { position: absolute; left: -60px; top: 0; display: flex; flex-direction: column; gap: 8px; }
+.npcs img { width: 46px; height: 46px; }
+@media (max-width: 900px) {
+  .npcs { position: static; float: right; flex-direction: row; gap: 6px; margin: 0 0 6px 10px; }
+  .npcs img { width: 38px; height: 38px; }
+}
+@media (max-width: 620px) { .urow { margin-left: 4%; } .avatar { width: 40px; height: 40px; } }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .thumbs img { width: 52px; height: 52px; border-radius: 8px; cursor: pointer; opacity: .7; border: 2px solid transparent; }
 .thumbs img.cur { opacity: 1; border-color: var(--accent); }
@@ -293,6 +304,12 @@ body[data-look] #drawer { backdrop-filter: blur(10px); }
   background: color-mix(in srgb, var(--bg) 60%, transparent); }
 .pcard .ptop { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .pcard .pname { font-weight: 600; font-size: 15px; }
+.pcard .pwho { display: flex; gap: 10px; align-items: center; min-width: 0; flex: 1; }
+.pcard .ptop > span { flex: none; white-space: nowrap; }
+.pcard .ptop:has(.pwho) { align-items: center; }
+.pcard .pport { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; padding: 2px;
+  background: #f7f4ee; border: 1px solid rgba(0,0,0,.12); }
+.pcard.focus { outline: 2px solid var(--accent); }
 .pcard .pline { margin-top: 3px; }
 .pcard ul { margin: 6px 0 0; padding-left: 1.2em; }
 .pcard .edit { padding: 2px 8px; font-size: 12px; flex: none; }
@@ -791,6 +808,20 @@ function rolledHTML(r) {
   return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${r.rolls.map(v => dieSVG(d.sides, v)).join("")}${mod} = <strong>${r.total}</strong> ${needText(r) ? `<span class="muted">(${needText(r)})</span>` : ""} ${res}</div>`;
 }
 
+// The people named in a GM message who have a portrait, in order of first mention (up to 3).
+function peopleIn(text) {
+  const out = [];
+  for (const p of S.data.people_art || []) {
+    let at = -1;
+    for (const n of p.names) {
+      if (n.length < 3 || n[0] !== n[0].toUpperCase()) continue;
+      const m = new RegExp(`(^|[^\\w])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`).exec(text || "");
+      if (m && (at < 0 || m.index < at)) at = m.index;
+    }
+    if (at >= 0) out.push([at, p]);
+  }
+  return out.sort((a, b) => a[0] - b[0]).slice(0, 3).map(x => x[1]);
+}
 function msgHTML(m, isLastUser, isLastGm) {
   if (m.role === "user" && m.roll) {
     const bubble = `<div class="msg user" data-id="${m.id}">${rolledHTML(m.roll)}</div>`;
@@ -823,7 +854,9 @@ function msgHTML(m, isLastUser, isLastGm) {
     chips.push(`<span class="chip" title="${tip}">⏱ ${total}s</span>`);
   }
   if (m.tools?.length) chips.push(`<span class="chip" title="${esc(m.tools.map(t => t.tool + " " + t.arguments).join("\n"))}">🔎 ${m.tools.length} lookup${m.tools.length > 1 ? "s" : ""}</span>`);
+  const npcs = peopleIn(m.content);
   return `<div class="msg assistant" data-id="${m.id}">
+    ${npcs.length ? `<div class="npcs">${npcs.map(p => `<img src="/api/campaigns/${S.slug}/people/art/${p.file}" alt="${esc(p.name)}" title="${esc(p.name)}" data-person="${esc(p.name)}">`).join("")}</div>` : ""}
     ${m.reasoning ? `<details class="think"><summary>thinking</summary><div>${esc(m.reasoning)}</div></details>` : ""}
     ${rollsHTML(m.rolls)}
     <div class="body">${md(m.content)}</div>
@@ -894,6 +927,7 @@ function renderChat(scroll) {
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
   $("view").querySelectorAll(".avatar").forEach(a => a.onclick = () => openPanel("character"));
+  $("view").querySelectorAll("[data-person]").forEach(a => a.onclick = () => { PEOPLE_FOCUS = a.dataset.person; PANEL === "people" ? renderPeople() : openPanel("people"); });
   $("view").querySelectorAll(".rollreq.live").forEach(card => {
     const go = () => rollDice(card.dataset.roll);
     card.querySelector("[data-act=roll]").onclick = go;
@@ -1132,6 +1166,9 @@ function updateStatus(st, scenes) {
   if (details && st.last_cast && Date.now() / 1000 - st.last_cast.at < 90) bits.push(`👥 ${st.last_cast.changes.join("; ")}`);
   if (st.cast_catchup) bits.push(`reading the story for people… ${Math.round(100 * st.cast_catchup.done / Math.max(1, st.cast_catchup.total))}%`);
   updatePanels(st.panels);
+  if (st.people_art && JSON.stringify(st.people_art) !== JSON.stringify(S.data.people_art)) {
+    S.data.people_art = st.people_art; renderChat(false);
+  }
   if (st.error) bits.push(`⚠ ${st.error}`);
   $("statusline").textContent = bits.join(" · ");
   $("statusline").title = bits.join(" · ");
@@ -1295,15 +1332,16 @@ async function refreshSigs() {
 
 // ---- people ----------------------------------------------------------------------------------
 const PERSON_FIELDS = [["pronouns", "Pronouns"], ["role", "Role"], ["look", "Looks"], ["where", "Where"], ["standing", "Attitude to you"]];
-let PEOPLE = [];
+let PEOPLE = [], PEOPLE_FOCUS = null, PEOPLE_IMAGES = false;
 async function renderPeople() {
   const d = await api(`/api/campaigns/${S.slug}/people`);
   if (PANEL !== "people") return;
-  PEOPLE = d.people;
+  PEOPLE = d.people; PEOPLE_IMAGES = d.images;
   const behind = d.latest - d.until;
   const progress = d.catching_up
     ? `<p class="muted">Reading the story for people… (${Math.round(100 * d.catching_up.done / Math.max(1, d.catching_up.total))}%)</p>`
     : d.reading ? `<p class="muted">Reading the latest turn…</p>`
+    : d.painting ? `<p class="muted">Painting portraits…</p>`
     : behind > 4 ? `<p class="muted">${d.until ? "Some of the story hasn't been read for people yet." : "This campaign started before the People list: the archivist can read the story so far to fill it in."} <button id="readPeople">Read the story</button></p>` : "";
   $("drawerBody").innerHTML = `
     ${progress}
@@ -1322,7 +1360,13 @@ async function renderPeople() {
     await api(`/api/campaigns/${S.slug}/people/refresh`, { method: "POST" });
     startPoll(); setTimeout(() => PANEL === "people" && renderPeople(), 1500);
   });
-  if (d.catching_up || d.reading) setTimeout(() => PANEL === "people" && !$("drawerBody").querySelector(".editing-person") && renderPeople(), 4000);
+  if (PEOPLE_FOCUS) {
+    const i = PEOPLE.findIndex(p => p.name === PEOPLE_FOCUS);
+    const card = $("peopleList").querySelector(`.pcard[data-i="${i}"]`);
+    if (card) { card.classList.add("focus"); card.scrollIntoView({ block: "center" }); }
+    PEOPLE_FOCUS = null;
+  }
+  if (d.catching_up || d.reading || d.painting) setTimeout(() => PANEL === "people" && !$("drawerBody").querySelector(".editing-person") && renderPeople(), 4000);
 }
 function sceneOfMsg(id) { const sc = sceneFor(id); return sc ? sc.id : null; }
 function drawPeople(filter) {
@@ -1331,8 +1375,9 @@ function drawPeople(filter) {
   $("peopleList").innerHTML = shown.map(([p, i]) => {
     const seen = p.last ? sceneOfMsg(p.last) : null;
     return `<div class="pcard" data-i="${i}">
-      <div class="ptop"><div><span class="pname">${esc(p.name || "(new)")}</span>${p.pronouns ? ` <span class="muted">· ${esc(p.pronouns)}</span>` : ""}</div>
-        <button class="edit" data-edit="${i}">Edit</button></div>
+      <div class="ptop"><div class="pwho">${p.portrait ? `<img class="pport" src="/api/campaigns/${S.slug}/people/art/${p.portrait}" alt="">` : ""}
+          <div><span class="pname">${esc(p.name || "(new)")}</span>${p.pronouns ? ` <span class="muted">· ${esc(p.pronouns)}</span>` : ""}</div></div>
+        <span>${PEOPLE_IMAGES && p.name ? `<button class="edit" data-paint="${i}" title="${p.portrait ? "Paint a new portrait" : "Paint a portrait"} (uses their role and looks)">🎨</button> ` : ""}<button class="edit" data-edit="${i}">Edit</button></span></div>
       ${p.role ? `<div class="pline">${esc(p.role)}</div>` : ""}
       ${p.aliases?.length ? `<div class="pline muted">also: ${esc(p.aliases.join(", "))}</div>` : ""}
       ${p.look ? `<div class="pline"><span class="muted">Looks:</span> ${esc(p.look)}</div>` : ""}
@@ -1343,6 +1388,14 @@ function drawPeople(filter) {
     </div>`;
   }).join("") || `<p class="muted">${q ? "Nobody matches." : "Nobody yet: people are added as you meet them."}</p>`;
   $("peopleList").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editPerson(+b.dataset.edit));
+  $("peopleList").querySelectorAll("[data-paint]").forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "…";
+    try {
+      await api(`/api/campaigns/${S.slug}/people/portrait`, { method: "POST", body: JSON.stringify({ name: PEOPLE[+b.dataset.paint].name }) });
+      const st = await api(`/api/campaigns/${S.slug}/status`);
+      S.data.people_art = st.people_art; renderChat(false); renderPeople();
+    } catch (e) { b.textContent = "🎨"; b.disabled = false; alert(e.message); }
+  });
 }
 function editPerson(i) {
   const p = PEOPLE[i];

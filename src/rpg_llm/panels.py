@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 
-from rpg_llm import cast, sheet, wiki
+from rpg_llm import cast, portrait, sheet, wiki
 from rpg_llm.vault import Campaign
 
 CHARACTER = ("name", "concept", "appearance", "skills", "condition", "companions")
@@ -91,8 +91,9 @@ def signatures(campaign: Campaign) -> dict:
     return {
         "character": _sig([sh.get(k) for k in CHARACTER]),
         "gear": _sig([sh.get(k) for k in GEAR]),
-        "people": _sig([(p["name"], p["pronouns"], p["role"], p["where"], p["standing"],
-                         p["notes"]) for p in cast.people(campaign)]),
+        "people": _sig([[(p["name"], p["pronouns"], p["role"], p["where"], p["standing"],
+                          p["notes"]) for p in cast.people(campaign)],
+                        portrait.people_index(campaign)]),
         "places": _sig([(s.location or "") for s in state.scenes]),
         "journal": _sig([sh.get("obligations"), section(campaign.brief, "Active threads"),
                          len(state.scenes)]),

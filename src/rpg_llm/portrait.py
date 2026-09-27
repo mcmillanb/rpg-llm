@@ -7,10 +7,12 @@ import re
 import secrets
 from pathlib import Path
 
+import yaml
+
 from rpg_llm import images, prompts
 from rpg_llm.config import ImageGen
 from rpg_llm.llm import LLMClient
-from rpg_llm.vault import Campaign
+from rpg_llm.vault import Campaign, slugify
 
 SIZE = 512
 DESCRIBE_SCHEMA = {
@@ -90,3 +92,55 @@ def choose(campaign: Campaign, name: str, prompt: str | None = None) -> None:
     if prompt:
         meta["portrait_prompt"] = prompt
     campaign.save_meta(meta)
+
+
+# ---- the people the character meets ---------------------------------------------------------
+# Painted from the cast record (role, looks, pronouns) with no model call in between. Kept apart
+# from cast.yaml, whose versions are rewound with the story: a portrait isn't undone by a rewind.
+
+PEOPLE_DIR = "art/people"
+PEOPLE_INDEX = "art/people/index.yaml"
+GENDER = {"he": "man", "she": "woman", "they": "person"}
+
+
+def people_index(campaign: Campaign) -> dict[str, str]:
+    text = campaign.read(PEOPLE_INDEX)
+    data = yaml.safe_load(text) if text.strip() else {}
+    return data if isinstance(data, dict) else {}
+
+
+def person_file(index: dict[str, str], names: list[str]) -> str | None:
+    for n in names:
+        if n.lower() in index:
+            return index[n.lower()]
+    return None
+
+
+def person_prompt(p: dict, system: str) -> str:
+    who = GENDER.get((p.get("pronouns") or "").split("/")[0], "")
+    bits = [f"A {who}" if who else "A character", p.get("role") or ""]
+    text = ", ".join(b for b in bits if b) + "."
+    if p.get("look"):
+        text += f" Appearance: {p['look']}."
+    if (p.get("pronouns") or "").startswith("it"):
+        text += " Not necessarily human: show them as the text describes."
+    return f"{text} From a {system or 'role-playing'} story."
+
+
+def add_person(campaign: Campaign, names: list[str], webp: bytes) -> str:
+    index = people_index(campaign)
+    base = slugify(names[0])[:40] or "person"
+    n = 1
+    while campaign.path(f"{PEOPLE_DIR}/{base}-{n:02d}.webp").exists():
+        n += 1
+    name = f"{base}-{n:02d}.webp"
+    campaign.path(PEOPLE_DIR).mkdir(parents=True, exist_ok=True)
+    campaign.path(f"{PEOPLE_DIR}/{name}").write_bytes(webp)
+    for key in names:
+        index[key.lower()] = name
+    campaign.write(PEOPLE_INDEX, yaml.safe_dump(index, sort_keys=True, allow_unicode=True))
+    return name
+
+
+def people_files(campaign: Campaign) -> set[str]:
+    return set(people_index(campaign).values())

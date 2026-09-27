@@ -44,6 +44,8 @@ class Runtime:
         self.turns: dict[str, int] = {}  # turns in progress per campaign
         self.tasks: set[asyncio.Task] = set()
         self.casting: set[str] = set()  # campaigns whose cast is being brought up to date
+        self.painting: set[str] = set()  # campaigns whose people are being painted
+        self.images_down_until = 0.0
         self.reload()
 
     def reload(self) -> None:
@@ -148,6 +150,35 @@ class Runtime:
         finally:
             st["cast_catchup"] = None
             self.casting.discard(c.slug)
+        await self.paint_people(c)
+
+    async def paint_people(self, c: Campaign) -> None:
+        """Give everyone in the cast with a description a small portrait, one at a time, newest
+        acquaintances first. Stops at the first image error (the generator may be down)."""
+        cfg = self.settings.app.images
+        if not cfg.enabled or c.slug in self.painting or time.time() < self.images_down_until:
+            return
+        self.painting.add(c.slug)
+        try:
+            look = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
+            while True:
+                index = portrait.people_index(c)
+                todo = [p for p in sorted(cast.people(c), key=lambda p: -p["last"])
+                        if (p["look"] or p["role"])
+                        and not portrait.person_file(index, cast.names_of(p))]
+                if not todo:
+                    return
+                p = todo[0]
+                webp = await portrait.paint(cfg, look, portrait.person_prompt(
+                    p, c.meta.get("system") or ""))
+                portrait.add_person(c, cast.names_of(p), webp)
+        except Exception as e:
+            log.exception("painting people failed")
+            self.images_down_until = time.time() + 900  # try again in a while, not every turn
+            self.st(c.slug)["error"] = ("portraits: " + (str(e) if isinstance(e, images.ImageError)
+                                                         else "the image generator isn't answering"))
+        finally:
+            self.painting.discard(c.slug)
 
     async def tail_budget(self) -> int:
         window = await self.dm.context_window() or 32768
@@ -467,6 +498,17 @@ async def repair_roll(rt: Runtime, c: Campaign, convo: list[dict], reply: str) -
         return None
 
 
+def people_art(c: Campaign) -> list[dict]:
+    """For the chat's NPC avatars: each person with a portrait, and the names to spot them by."""
+    index = portrait.people_index(c)
+    out = []
+    for p in cast.people(c):
+        f = portrait.person_file(index, cast.names_of(p))
+        if f:
+            out.append({"name": p["name"], "names": cast.names_of(p), "file": f})
+    return out
+
+
 def can_rewind(c: Campaign) -> bool:
     """Rewinding = changing or re-rolling a turn after seeing the GM's reply. Off by default so
     outcomes stick; a campaign can allow it."""
@@ -499,6 +541,10 @@ def replied(msgs: list[dict]) -> bool:
 
 
 NO_REWIND = "Rewinds are off for this campaign: the GM's reply stands. (Allow them in the campaign's settings.)"
+
+
+class PersonIn(BaseModel):
+    name: str
 
 
 class PeopleIn(BaseModel):
@@ -702,7 +748,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
                 "themes": themes.public(),
                 "messages": msgs,
                 "live_start": state.live_start(), "scenes": [vars(s) for s in state.scenes],
-                "status": rt.st(c.slug), "panels": panels.signatures(c)}
+                "status": rt.st(c.slug), "panels": panels.signatures(c),
+                "people_art": people_art(c)}
 
     @app.get("/api/campaigns/{slug}/status")
     async def get_status(slug: str):
@@ -712,6 +759,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         state = c.load_state()
         return {**rt.st(slug), "scenes": [vars(s) for s in state.scenes],
                 "panels": panels.signatures(c), "casting": slug in rt.casting,
+                "people_art": people_art(c),
                 "live_start": state.live_start(), "gazetteer_size": len(c.gazetteer())}
 
     @app.get("/api/campaigns/{slug}/file")
@@ -797,10 +845,39 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         rt = R()
         c = rt.campaign(slug)
         msgs = c.messages()
-        return {"people": sorted(cast.people(c), key=lambda p: -p["last"]),
+        index = portrait.people_index(c)
+        return {"people": [{**p, "portrait": portrait.person_file(index, cast.names_of(p))}
+                           for p in sorted(cast.people(c), key=lambda p: -p["last"])],
+                "images": rt.settings.app.images.enabled, "painting": slug in rt.painting,
                 "until": cast.load_all(c)["until"], "latest": msgs[-1]["id"] if msgs else 0,
                 "catching_up": rt.st(slug).get("cast_catchup"),
                 "reading": slug in rt.casting}
+
+    @app.get("/api/campaigns/{slug}/people/art/{name}")
+    async def person_art(slug: str, name: str):
+        c = R().campaign(slug)
+        if name not in portrait.people_files(c):
+            raise HTTPException(404, "no such portrait")
+        return FileResponse(c.path(f"{portrait.PEOPLE_DIR}/{name}"), media_type="image/webp",
+                            headers={"Cache-Control": "max-age=31536000, immutable"})
+
+    @app.post("/api/campaigns/{slug}/people/portrait")
+    async def repaint_person(slug: str, body: PersonIn):
+        """Paint (or repaint) one person's portrait from their record."""
+        rt = R()
+        c = rt.campaign(slug)
+        cfg = rt.settings.app.images
+        if not cfg.enabled:
+            raise HTTPException(409, "No image generator is set up (admin → Image generation).")
+        p = cast.find(cast.people(c), body.name)
+        if p is None:
+            raise HTTPException(404, f"nobody called {body.name!r}")
+        look = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
+        try:
+            webp = await portrait.paint(cfg, look, portrait.person_prompt(p, c.meta.get("system") or ""))
+        except images.ImageError as e:
+            raise HTTPException(502, str(e))
+        return {"portrait": portrait.add_person(c, cast.names_of(p), webp)}
 
     @app.put("/api/campaigns/{slug}/people")
     async def put_people(slug: str, body: PeopleIn):
@@ -811,6 +888,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             data = cast.load_all(c)
             data["people"] = body.people
             saved = cast.save(c, data, "edited by the player")
+        rt.spawn(rt.paint_people(c))  # someone added or described: paint them
         return {"people": sorted(saved["people"], key=lambda p: -p["last"])}
 
     @app.post("/api/campaigns/{slug}/people/refresh")
