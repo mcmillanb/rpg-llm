@@ -146,12 +146,17 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str) -> d
     if len(messages) < 2 or messages[-1]["role"] != "assistant":
         return None
     current = load(campaign)
-    exchange = "\n\n".join(f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {m['content'][:3000]}"
-                           for m in messages[-2:])
+    fmt = lambda ms: "\n\n".join(f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {m['content'][:3000]}"
+                                  for m in ms)
+    exchange = fmt(messages[-2:])
+    # the exchange before, for context: a correction ("that's 211, not 200") only makes sense
+    # next to what it corrects
+    earlier = (f"\nPrevious exchange (already on the sheet; context only, don't apply it again):\n"
+               f"{fmt(messages[-4:-2])}\n" if len(messages) >= 4 else "")
     task = prompts.SHEET_TASK.format(
         sheet=yaml.safe_dump(current, sort_keys=False, allow_unicode=True) if current
         else "(no sheet yet: create it from the brief and this exchange)",
-        exchange=exchange)
+        exchange=exchange, earlier=earlier)
     result = await router.json([{"role": "system", "content": router_system},
                                 {"role": "user", "content": task}],
                                UPDATE_SCHEMA, max_tokens=1500)

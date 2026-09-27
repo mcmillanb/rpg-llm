@@ -10,7 +10,9 @@ How to run the game:
   asks a question, a price or terms, answer it and stop: don't accept a deal, hand over money or
   items, pay anyone, or move the scene on for them. They decide next.
 - Deals and money: keep offers simple and the arithmetic right, working from the sheet's
-  amounts. If the player sells only part of what they have, they just keep the rest.
+  amounts. If the player sells only part of what they have, they just keep the rest. When a
+  payment adds up several amounts, write the sum out in digits ("130 + 81 = 211 credits") and
+  check it.
 - Keep continuity with established facts. The campaign brief below and the campaign wiki are
   canon. Keep every character's name, gender, pronouns and role consistent with how they were
   introduced (check the notes and the condensed summary).
@@ -392,13 +394,26 @@ Not yet: these change nothing until the story shows them done.
   money is unchanged until the player accepts and the narration shows the exchange.
 - A job, deal or contract offered: not an obligation until the character accepts it.
 
+- A suggestion to pay someone ("settle up with Darrow before he starts counting") is not a
+  payment: the debt stays in obligations until the narration shows the money handed over.
+- Payment on delivery or later ("the supervisor has the cash") is not received yet.
+- Money someone else earns, is paid or owes ("the fifty credits Darrow just earned") is not the
+  character's money.
+
+Counting:
+- Selling, using or giving away some of a stack changes the count; the rest stays on the sheet
+  ("3 power cells", sells 2 -> "1 power cell").
+- A correction to an amount already on the sheet (the player points out the total should be
+  211, not 200) changes it by the difference only (+11). Never apply the same payment twice:
+  the previous exchange below is already on the sheet.
+
 Keep each list to the dozen most important entries. When in doubt, leave it off the sheet:
 the story itself is recorded elsewhere.
 
-Current sheet:
+Current sheet (already includes everything up to the latest exchange):
 {sheet}
-
-Latest exchange:
+{earlier}
+Latest exchange (apply only this):
 {exchange}
 
 Return JSON: changes (a list of short notes of what changed, under 12 words each, such as
