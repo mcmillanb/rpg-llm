@@ -19,7 +19,7 @@ TOOL = {"type": "function", "function": {
 
 REQUEST_TOOL = {"type": "function", "function": {
     "name": "request_roll",
-    "description": "Ask the player to roll on-screen dice for an uncertain action, then end your "
+    "description": "Ask the player to roll on-screen dice for an uncertain action or for damage, then end your "
                    "reply without narrating the outcome. Include the character's modifier in "
                    "dice; the prompt is a few words. Call it as a tool: never write its "
                    "arguments into the story.",

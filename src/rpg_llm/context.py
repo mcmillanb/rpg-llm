@@ -44,7 +44,8 @@ def system_prompt(campaign: Campaign, state: State) -> str:
                                   + prompts.LENGTHS[t["length"]],
                                   prompts.CONSEQUENCES[t["consequences"]], prompts.DICE[t["dice"]]]),
         brief=campaign.brief.strip() or "(nothing yet)",
-        arc=(f"\n# Story arc (GM only: guidance, not a script; never reveal it)\n\n{arc}\n"
+        arc=(f"\n# Story arc (GM only: never reveal it. Guidance, not a script: use it to keep the "
+             f"world moving and to offer leads)\n\n{arc}\n"
              if arc else ""),
     )
     if state.fold:

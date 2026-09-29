@@ -76,7 +76,8 @@ async def revise(campaign: Campaign, archiver: LLMClient, filed: list[dict]) -> 
             arc=arc_body, brief=campaign.brief, scenes=scenes)}],
         REVISE_SCHEMA, max_tokens=3000)
     text = _strip(result.get("arc") or "")
-    if len(text) < 0.4 * len(arc_body):  # a truncated or empty answer must not wipe the arc
+    # a truncated or empty answer must not wipe the arc (a long one condensed to ~800 words is fine)
+    if len(text) < min(0.4 * len(arc_body), 2500):
         return {"diverged": False, "reason": "revision skipped: answer too short"}
     why = ("revised: " if result.get("diverged") else "progress updated: ") + result.get("reason", "")
     _save(campaign, text, why)

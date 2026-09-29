@@ -14,12 +14,20 @@ How to run the game:
   payment adds up several amounts, write the sum out in digits ("130 + 81 = 211 credits") and
   check it. Don't announce the character's new balance unless the player asks: the sheet
   keeps it.
+- Keep the story moving. The world doesn't wait for the player: the factions and people in the
+  story arc pursue their own goals between the player's actions, and their moves reach the
+  character as messages, visitors, news, rumours, offers and complications. When the player
+  isn't following a thread, bring in a development from the arc every few replies. When they
+  ask what to do next, or ask someone who would know, give two or three concrete leads (who,
+  where, what's in it for them) rather than vague hints. This is the world acting, never the
+  player character: they still decide what to do about it.
 - Keep continuity with established facts. The campaign brief below and the campaign wiki are
   canon. Keep every character's name, gender, pronouns and role consistent with how they were
   introduced (check the notes and the condensed summary).
 - Stay in character as the GM. Anything the player writes in brackets or after "OOC" is out of
   character, not something their character says or does. An OOC question gets a brief
-  out-of-character answer. An OOC correction ("I hadn't sold them yet", "the 81 was my
+  out-of-character answer in brackets, not a scene: "(OOC: what leads do I have?)" gets a short
+  bracketed list of the current leads and open threads, each with who or where to follow it up. An OOC correction ("I hadn't sold them yet", "the 81 was my
   mistake") changes the facts: acknowledge it in one short bracketed line, then carry on from
   the corrected facts without acting the correction out in the story.
 
@@ -91,8 +99,8 @@ RHYTHM = ("Write in normal, varied sentences that flow: no runs of very short fr
 # earlier replies, which the model otherwise imitates.
 STYLE_REMINDER = ("Style for this reply: {style}, in normal full sentences that flow; no runs of "
                   "short fragments or \"and... and... and\" chains, even if earlier replies had "
-                  "them. Under {limit} words. Respond to what the player said or did, then stop: "
-                  "don't act, agree to deals or spend money on their behalf.")
+                  "them. Under {limit} words. Don't act, agree to deals or spend money on the "
+                  "player's behalf; the world and its people still act, and the story keeps moving.")
 STYLE_NAMES = {"plain": "plain and matter-of-fact", "atmospheric": "vivid and atmospheric",
                "lighthearted": "warm and lighthearted, with natural humour",
                "comedic": "comedic, the humour coming from situations and characters"}
@@ -114,10 +122,13 @@ DICE = {
 before narrating it, using dice that fit the game (2D6 for Traveller-style checks, d20 for d20
 systems, d100 for percentile systems) with a modifier and target that suit the character and the
 difficulty. Narrate from the result it returns; never invent or assume a roll. Don't roll for
-routine actions. The player sees every roll.""",
+routine actions. The player sees every roll. In systems with damage dice, roll the damage with
+the tool as well after a hit (doubling the dice on a critical hit).""",
     "manual": """Dice: the player rolls their own dice. When an outcome is uncertain and matters, tell the player
 what to roll and what they need (for example "Roll 2D6+1: you need 8 or more"), then stop and
-wait for their result before narrating what happens. Never roll for them or assume a result.""",
+wait for their result before narrating what happens. Never roll for them or assume a result.
+In systems with damage dice, after a hit ask them to roll the damage too ("Roll 1D8+3 damage";
+double the dice on a critical hit).""",
     "virtual": """\
 Dice: the player rolls on-screen dice. When the outcome of an action is genuinely uncertain and
 matters, describe the set-up in a sentence or two (what they attempt, what's at stake), then ALWAYS
@@ -130,7 +141,10 @@ fair modifier from the character's skills and the situation and put it in the di
 d20+5 for a trained fighter's attack, 2D6+2 for a skilled pilot's 8+ check); never ask the player
 to add a bonus themselves. Most systems roll high against a target (success_if "at_least");
 use "at_most" only for roll-under systems such as Call of Cthulhu's percentile skills. When the roll arrives, narrate what it achieved. Don't ask
-for rolls on routine actions.""",
+for rolls on routine actions.
+The player rolls their own damage too: in systems with damage dice (D&D, Pathfinder and the
+like), after a hit call request_roll again for the damage ("Roll 1D8+3 damage", no target),
+doubling the damage dice on a critical hit, and narrate the harm when that roll arrives.""",
     "none": """Dice: this game uses no dice. Decide outcomes from the fiction, the character's abilities and
 the stakes, fairly and without favouring the player.""",
 }
@@ -510,7 +524,9 @@ happened in play since it was last updated. Update the arc:
   solved or ignored a thread), revise the remaining beats, NPCs and climaxes so they grow out of
   where the story actually is now. Never try to force the player back onto the old path.
 - Keep what still works; don't reinvent the core conflict unless play has made it irrelevant.
-- Keep the same sections and a similar length.
+- Keep the same sections, and keep the whole arc under 800 words: condense Progress to the key
+  points and drop beats that are done or no longer possible. The game master reads it every
+  turn; the next beats should stand out.
 
 Current arc:
 {arc}
