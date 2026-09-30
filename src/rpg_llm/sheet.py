@@ -79,10 +79,21 @@ def tidy_changes(changes: list) -> list[str]:
     return out[:6]
 
 
+def amount(money: str) -> float | None:
+    m = re.search(r"-\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?", money or "")
+    return float(m.group().replace(",", "").replace(" ", "")) if m else None
+
+
 def guard(old: dict | None, new: dict) -> dict:
-    """Protect the sheet from a small model's slips: a known amount of money never turns into
-    one without a number, and lists stay short."""
+    """Protect the sheet from a model's slips: a known amount of money never turns into one
+    without a number or goes below zero (the character can't spend money they don't have: a
+    negative balance is a misread, like '1,800' for 180), and lists stay short. Returns the
+    sheet; a refused money change is reported in new['_refused']."""
     if old and re.search(r"\d", old.get("money", "")) and not re.search(r"\d", new.get("money", "")):
+        new["money"] = old["money"]
+    was, now = amount(old.get("money", "")) if old else None, amount(new.get("money", ""))
+    if was is not None and now is not None and now < 0 <= was:
+        new["_refused"] = new["money"]
         new["money"] = old["money"]
     for k in LISTS:
         new[k] = [e if len(e) <= MAX_ENTRY else e[:MAX_ENTRY - 1] + "…" for e in new[k][:MAX_ITEMS]]
@@ -188,11 +199,15 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     new = guard(current, clean(result.get("sheet") or {}))
     if current and new["money"] != current["money"] and not MONEY_WORDS.search(exchange):
         new["money"] = current["money"]  # nothing about money in this exchange
+    refused = new.pop("_refused", None)
     if current is not None and (not result.get("changed") or new == current):
-        return None
+        return {"changes": [f"⚠ money would have gone to {refused}: left at {current['money']}, check it"]} \
+            if refused else None
     if not new.get("name") and current is None:
         return None  # nothing usable yet
     changes = tidy_changes(result.get("changes") or [])
+    if refused:
+        changes.append(f"⚠ money would have gone to {refused}: left at {current['money']}, check it")
     what = "; ".join(changes) or ("created" if current is None else "updated")
     save(campaign, new, messages[-1]["id"], what)
     return {"changes": changes or [what]}

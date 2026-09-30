@@ -1158,3 +1158,15 @@ def test_a_hand_correction_survives_a_rewind(vault):
     assert sheet.load(c)["money"] == "12 Cr"
     assert sheet.rewind(c, 5)  # further back: the hand fix still stands
     assert sheet.load(c)["money"] == "12 Cr"
+
+
+async def test_money_never_goes_below_zero(vault):
+    c = vault.create("T")
+    sheet.save(c, {"name": "Callen", "money": "121 Cr", "gear": ["truck"]}, 0, "x")
+    play(c, ("I pay Kess", "You settle the final eighteen hundred credits."))
+    llm = FakeLLM([{"changes": ["Paid 1800 Cr"], "changed": True,
+                    "sheet": {**sheet.blank(), "name": "Callen", "money": "-1,679 Cr", "gear": ["truck", "certificate"]}}])
+    r = await sheet.update(c, llm)
+    s = sheet.load(c)
+    assert s["money"] == "121 Cr" and "certificate" in s["gear"]
+    assert any("-1,679" in x and "check it" in x for x in r["changes"])

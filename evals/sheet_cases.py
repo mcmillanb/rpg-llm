@@ -116,6 +116,13 @@ PAID_DARROW = ("Head outside and give Darrow 100cr, \"That's half the value of t
                "for myself.\" Darrow counts it and claps you on the shoulder. You climb back into the "
                "truck and head for Secondary Road 4.")
 
+PLANNED = ("lets do both, I'll sell those to you and I will do the contract. make the exchange, load up and head to Silas",
+           "Kess nods approvingly at the scrap. \"Twenty credits,\" he says, handing over a small stack "
+           "of chits. He keeps your registration certificate on his desk as collateral until the books "
+           "balance. You load three crates of sensor housing parts for Silas. The math is simple: the "
+           "twenty credits from the scrap plus the eighty credit hauling fee leaves you owing only "
+           "sixteen more once the job is done, meaning you'll walk away fully registered.")
+
 
 CASES = [
     ("found and kept: cells in gear", FOUND,
@@ -130,6 +137,7 @@ CASES = [
     ("the previous payment isn't applied again", NO_MONEY_AFTER_PAY, lambda s: money(s) == 224),
     ("paid Darrow his share, kept the cell", PAID_DARROW,
      lambda s: money(s) == 104 and has(s["gear"], "cell") and not has(s["obligations"], "darrow")),
+    ("paid now for scrap; the haul fee and the balance come later", PLANNED, lambda s: money(s) == 224),
     ("paid on delivery: nothing yet", ON_DELIVERY, lambda s: money(s) == 204),
     ("someone else's money isn't yours", THEIRS, lambda s: money(s) == 204),
     ("a price offered: no sale yet", OFFERED,
