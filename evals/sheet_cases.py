@@ -117,11 +117,19 @@ PAID_DARROW = ("Head outside and give Darrow 100cr, \"That's half the value of t
                "truck and head for Secondary Road 4.")
 
 PLANNED = ("lets do both, I'll sell those to you and I will do the contract. make the exchange, load up and head to Silas",
-           "Kess nods approvingly at the scrap. \"Twenty credits,\" he says, handing over a small stack "
+           "Kess kicks the empty military canister and checks the bungee cords, nodding approvingly "
+           "at the scrap. \"Twenty credits,\" he says, handing over a small stack "
            "of chits. He keeps your registration certificate on his desk as collateral until the books "
            "balance. You load three crates of sensor housing parts for Silas. The math is simple: the "
            "twenty credits from the scrap plus the eighty credit hauling fee leaves you owing only "
            "sixteen more once the job is done, meaning you'll walk away fully registered.")
+
+LOAN_TAKEN = ("I'll take that advance, thanks",
+              "Kess counts out two hundred credits and pushes them across the desk. \"Two-twenty back "
+              "by Friday, Vane. I'm a broker, not a charity.\"")
+LOAN_REPAID = ("I pay Kess back what I can",
+               "You hand Kess a hundred credits toward the advance. He makes a note in his ledger. "
+               "\"Hundred and twenty to go.\"")
 
 
 CASES = [
@@ -137,7 +145,12 @@ CASES = [
     ("the previous payment isn't applied again", NO_MONEY_AFTER_PAY, lambda s: money(s) == 224),
     ("paid Darrow his share, kept the cell", PAID_DARROW,
      lambda s: money(s) == 104 and has(s["gear"], "cell") and not has(s["obligations"], "darrow")),
-    ("paid now for scrap; the haul fee and the balance come later", PLANNED, lambda s: money(s) == 224),
+    ("paid now for scrap; the haul fee and the balance come later", PLANNED,
+     lambda s: money(s) == 224 and has(s["gear"], "cell") and not has(s["gear"], "canister")),
+    ("a loan taken: cash up, the loan recorded", LOAN_TAKEN,
+     lambda s: money(s) == 404 and has(s["loans"], "kess") and has(s["loans"], "220", "two-twenty")),
+    ("part of a loan repaid: cash down, the loan reduced", LOAN_REPAID,
+     lambda s: money(s) == 104 and has(s["loans"], "120") and not has(s["loans"], "220")),
     ("paid on delivery: nothing yet", ON_DELIVERY, lambda s: money(s) == 204),
     ("someone else's money isn't yours", THEIRS, lambda s: money(s) == 204),
     ("a price offered: no sale yet", OFFERED,
@@ -164,6 +177,10 @@ async def run_case(llm, exchange) -> dict:
         c.append({"role": "user", "content": pairs[0][0]})
         c.append({"role": "assistant", "content": pairs[0][1]})
         pairs = pairs[1:]
+    if exchange is PLANNED:  # the scrap being sold is on the sheet, as in play
+        sheet.save(c, {**START, "gear": START_GEAR + ["Empty military canister", "Bungee cords"]}, 0, "start")
+    if exchange is LOAN_REPAID:
+        sheet.save(c, {**START, "loans": ["Owe Kess 220 Cr by Friday"]}, 0, "start")
     if exchange is CORRECTED:  # start with the first exchange already applied
         sheet.save(c, {**START, "money": "404 Cr",
                        "gear": [g for g in START_GEAR if "cell" not in g] + ["1 military-grade power cell"]},
@@ -191,7 +208,7 @@ async def main() -> None:
             good = ok(s)
             passed += good
             if not good:
-                print(f"   FAIL {name}: money={s['money']!r} gear={s['gear'][3:]} obl={s['obligations'][1:]}")
+                print(f"   FAIL {name}: money={s['money']!r} gear={s['gear'][3:]} obl={s['obligations'][1:]} loans={s['loans']}")
         total += passed
         print(f"{passed}/{a.runs}  {name}")
     print(f"\n{total}/{a.runs * len(CASES)} passed")

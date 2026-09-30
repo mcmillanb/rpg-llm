@@ -19,10 +19,10 @@ from rpg_llm.vault import Campaign
 
 FILE = "character.yaml"
 HISTORY = "character.history.jsonl"
-LISTS = ("skills", "condition", "gear", "assets", "companions", "obligations")
+LISTS = ("skills", "condition", "gear", "assets", "companions", "loans", "obligations")
 TEXTS = ("name", "concept", "appearance", "money")
-FIELDS = ("name", "concept", "appearance", "skills", "condition", "money", "gear", "assets",
-          "companions", "obligations")
+FIELDS = ("name", "concept", "appearance", "skills", "condition", "money", "loans", "gear",
+          "assets", "companions", "obligations")
 
 SHEET_SCHEMA = {
     "type": "object",
@@ -34,14 +34,22 @@ SHEET_SCHEMA = {
     "additionalProperties": False,
 }
 
+PAYMENT = {
+    "type": "object",
+    "properties": {"amount": {"type": "number"}, "direction": {"type": "string", "enum": ["in", "out"]},
+                   "what": {"type": "string"}},
+    "required": ["amount", "direction", "what"],
+    "additionalProperties": False,
+}
 UPDATE_SCHEMA = {
     "type": "object",
     "properties": {
         "changes": {"type": "array", "items": {"type": "string"}},
         "changed": {"type": "boolean"},
+        "payments": {"type": "array", "items": PAYMENT},
         "sheet": SHEET_SCHEMA,
     },
-    "required": ["changes", "changed", "sheet"],
+    "required": ["changes", "changed", "payments", "sheet"],
     "additionalProperties": False,
 }
 
@@ -82,6 +90,27 @@ def tidy_changes(changes: list) -> list[str]:
 def amount(money: str) -> float | None:
     m = re.search(r"-\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?", money or "")
     return float(m.group().replace(",", "").replace(" ", "")) if m else None
+
+
+def apply_payments(money: str, payments: list[dict]) -> str | None:
+    """The new money string: the old amount plus what came in, minus what went out, in the old
+    string's format ("Cr 450", "1,204 gp"). None if the old money has no number to add to.
+    The model reports payments; the adding up is done here, not by the model."""
+    m = re.search(r"-?\d[\d,]*(?:\.\d+)?", money or "")
+    if not m:
+        return None
+    total = float(m.group().replace(",", ""))
+    for p in payments:
+        try:
+            amt = abs(float(p.get("amount") or 0))
+        except (TypeError, ValueError):
+            continue
+        total += amt if p.get("direction") == "in" else -amt
+    decimals = "." in m.group() or total != int(total)
+    text = f"{total:,.2f}" if decimals else f"{int(total):,}"
+    if "," not in m.group() and abs(total) < 10000:
+        text = text.replace(",", "")
+    return money[:m.start()] + text + money[m.end():]
 
 
 def guard(old: dict | None, new: dict) -> dict:
@@ -191,26 +220,57 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
         else "(no sheet yet: create it from the brief and this exchange)",
         exchange=exchange, earlier=earlier)
     system = SYSTEM if current else f"{SYSTEM}\n\nCampaign brief:\n{campaign.brief.strip()}"
-    result = await router.json([{"role": "system", "content": system},
-                                {"role": "user", "content": task}],
-                               UPDATE_SCHEMA, max_tokens=1500)
+    ask = [{"role": "system", "content": system}, {"role": "user", "content": task}]
+    rechecked = None
+    money_talk = bool(MONEY_WORDS.search(exchange))
+
+    def read(res: dict) -> dict:
+        sh = clean(res.get("sheet") or {})
+        if current:  # money = the old amount plus the reported payments, added up here
+            computed = apply_payments(current["money"], res.get("payments") or [] if money_talk else [])
+            if computed is not None:
+                sh["money"] = computed
+        return guard(current, sh)
+
+    result = await router.json(ask, UPDATE_SCHEMA, max_tokens=1500)
+    new = read(result)
+    if new.get("_refused"):  # below zero: one more look before giving up on the change
+        again = await router.json(ask + [
+            {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)},
+            {"role": "user", "content": prompts.SHEET_RECHECK.format(
+                new=new["_refused"], old=current["money"],
+                history=fmt(messages[-12:-4]) or "(none)")}], UPDATE_SCHEMA, max_tokens=1500)
+        second = read(again)
+        if not second.get("_refused"):
+            # accepted, but say so: the first reading was impossible, the second may be a guess
+            rechecked = f"⚠ first read gave {new['_refused']}; rechecked to {second['money']}, check it"
+            result, new = again, second
     if campaign.messages()[-1]["id"] != messages[-1]["id"]:
         return None  # the turn was taken back meanwhile
-    new = guard(current, clean(result.get("sheet") or {}))
-    if current and new["money"] != current["money"] and not MONEY_WORDS.search(exchange):
-        new["money"] = current["money"]  # nothing about money in this exchange
     refused = new.pop("_refused", None)
+    flag = (f"⚠ money would have gone to {refused}: left at {current['money']}, check it"
+            if refused else None)
     if current is not None and (not result.get("changed") or new == current):
-        return {"changes": [f"⚠ money would have gone to {refused}: left at {current['money']}, check it"]} \
-            if refused else None
+        return {"changes": [flag], "refused": refused, "money": current["money"]} if refused else None
     if not new.get("name") and current is None:
         return None  # nothing usable yet
     changes = tidy_changes(result.get("changes") or [])
-    if refused:
-        changes.append(f"⚠ money would have gone to {refused}: left at {current['money']}, check it")
+    if flag or rechecked:
+        changes.append(flag or rechecked)
     what = "; ".join(changes) or ("created" if current is None else "updated")
     save(campaign, new, messages[-1]["id"], what)
-    return {"changes": changes or [what]}
+    out = {"changes": changes or [what]}
+    if refused:
+        out.update(refused=refused, money=new["money"])
+    return out
+
+
+def money_note(refused: dict | None) -> str:
+    """For the next turn's GM notes, after a payment the sheet couldn't accept."""
+    if not refused:
+        return ""
+    return prompts.MONEY_NOTE.format(what=f"the sheet would have gone to {refused['refused']}",
+                                     money=refused["money"])
 
 
 async def create_start(campaign: Campaign, archiver: LLMClient) -> dict | None:

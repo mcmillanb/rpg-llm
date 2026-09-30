@@ -25,9 +25,11 @@ Each campaign also has:
   are real random rolls the GM asks for through a tool; it narrates from the result and can't
   invent one. **Rewinds** (editing your last move or re-rolling the GM's reply after seeing it)
   are off by default; you can always take a message back while the GM is still replying (Esc).
-- **A character sheet** (money, gear, injuries, skills, assets, companions, debts). New
+- **A character sheet** (money, loans, gear, injuries, skills, assets, companions, debts). New
   campaigns start with one written from the premise; the router updates it after every reply;
-  you can edit it. The GM sees it every turn and keeps to it. Taking a turn back also undoes
+  you can edit it. The GM sees it every turn and keeps to it. The router reports each payment
+  and the app adds them up; money never goes below zero (borrowing goes under Loans), and an
+  update that would take it negative gets a second look, then a flag and a note to the GM. Taking a turn back also undoes
   what that turn did to the sheet.
 - **Reminder panels** for forgetful humans: a rail of icons beside the chat (in the footer on a
   phone) opens **Character**, **Gear** (money, kit, ship and property), **People** (everyone

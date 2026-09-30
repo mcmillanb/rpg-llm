@@ -391,13 +391,20 @@ What each field holds, and nothing else:
 - condition: the player character's OWN body and legal status only: injuries, illness,
   fatigue, "wanted by port authority". NOT story facts ("Senn is watching", "tamper line found
   on the pouch"), NOT other people ("Ilse is shaken"), NOT knowledge or suspicions.
-- money: the character's current funds as an amount, e.g. "Cr 450". When they pay or receive
-  money, do the arithmetic and write the new amount ("Cr 450" and pays Cr 200 -> "Cr 250").
-  Money owed to or by someone is NOT money: put it in obligations.
+- money: leave it exactly as it is. Instead, list every amount of money that actually changed
+  hands in the latest exchange in "payments" (in: the character receives it; out: they pay
+  it), and the sheet does the arithmetic. The character can't spend money they don't have.
+  Money owed to or by someone is NOT a payment until it's handed over: see loans and
+  obligations.
+- loans: money borrowed or lent, with who, how much and the terms ("Owe Kess 200 Cr, repay 220
+  by Friday", "Ship mortgage: 2,000 Cr a month to the bank", "Lent Darrow 50 Cr"). Taking a loan
+  adds the cash to money and an entry here; a repayment takes it off money and reduces or
+  removes the entry.
 - gear: items they carry or own (with charges, damage).
 - assets: ships, vehicles, property.
 - companions: people travelling or working with them.
-- obligations: things the character OWES or MUST do for someone else: debts, promises made,
+- obligations: things the character OWES or MUST do for someone else (loans of money go in
+  loans): shares owed, promises made,
   deadlines, summonses, sworn enemies. NOT their own plans, tactics or intentions ("claim the
   seal is forged", "never admit X", "call Maren") and NOT clues. Remove ones settled.
 
@@ -421,10 +428,10 @@ Not yet: these change nothing until the story shows them done.
 Counting:
 - Selling, using or giving away some of a stack changes the count; the rest stays on the sheet
   ("3 power cells", sells 2 -> "1 power cell").
-- A correction to an amount already on the sheet changes it by the difference only. Example:
-  the previous exchange paid 200 and the sheet already shows 404; now the player points out it
-  should have been 211, so the money becomes 404 + 11 = 415, not 404 + 211. Never apply the same
-  payment twice: the previous exchange below is already on the sheet.
+- A correction to an amount already on the sheet is a payment of the difference only. Example:
+  the previous exchange paid 200, which is already on the sheet; now the player points out it
+  should have been 211 and gets the rest, so payments is [in 11], not [in 211]. Never repeat a
+  payment: the previous exchange below is already on the sheet.
 - An order or arrangement for later (goods to collect, a job to do, money to pay someone) goes
   in obligations, so it isn't forgotten.
 
@@ -439,7 +446,9 @@ Latest exchange (apply only this):
 
 Return JSON: changes (a list of short notes of what changed, under 12 words each, such as
 "Paid 20 Cr for fuel"; no explanations or reasoning; empty if nothing changed), changed (bool),
-sheet (the full updated sheet)."""
+payments (each amount that changed hands in the latest exchange: amount as a plain number,
+direction "in" or "out", what for; empty if none), sheet (the full updated sheet, money left
+as it was)."""
 
 CAST_TASK = """\
 Task: keep the list of people the player character has met in a solo role-playing game.
@@ -477,8 +486,8 @@ SHEET_START_TASK = """\
 Create the player character's starting sheet for a new solo campaign, from the premise and the
 game. Fill in sensible, concrete starting values that fit both: money as an amount in the
 setting's currency, a handful of useful gear, skills matching the concept, any ship, vehicle or
-property the premise mentions, companions and obligations (debts, enemies, deadlines) the
-premise sets up. Keep entries short. Don't invent companions or assets the premise doesn't
+property the premise mentions, companions, loans (money borrowed, a ship mortgage) and
+obligations (promises, enemies, deadlines) the premise sets up. Keep entries short. Don't invent companions or assets the premise doesn't
 imply.
 
 Game / setting: {system}
@@ -488,7 +497,7 @@ Premise:
 
 Return JSON with the fields: name, concept, appearance (how they look, 1-2 sentences; use the
 premise's description if it has one), skills, condition (empty unless the premise says
-otherwise), money, gear, assets, companions, obligations."""
+otherwise), money, gear, assets, companions, loans, obligations."""
 
 ARC_TASK = """\
 You are preparing a solo tabletop RPG campaign as its game master. Write the hidden story arc:
@@ -560,3 +569,19 @@ ROLL_REPAIR = """\
 [GM NOTES] Your reply asks the player to roll, but you didn't call request_roll, so no dice
 appeared. Call request_roll now for exactly that roll: the dice with the character's modifier,
 a short prompt, and the target. Only the tool call; no text."""
+
+SHEET_RECHECK = """\
+Check that again. Your payments put the character's money at {new}, below zero, but they had
+{old} and can't spend money they don't have. Re-read the latest exchange: is the amount right
+(a misread like 1,800 for 180)? Did the payment actually happen in the narration, or is it
+only offered, planned or due later? Was it already on the sheet? Money they borrow goes in
+loans, not below zero. The earlier messages below show what was agreed and quoted before (the
+real price is usually there). Return the corrected JSON in the same shape.
+
+Earlier messages:
+{history}"""
+
+MONEY_NOTE = """\
+Correction: last turn's narration had the character pay more than they had ({what}). They
+have {money}. Put it right in the story (a miscount, a smaller amount, or the payment not going
+through) without remarking on the change."""

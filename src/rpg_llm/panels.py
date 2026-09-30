@@ -13,7 +13,7 @@ from rpg_llm import cast, portrait, sheet, wiki
 from rpg_llm.vault import Campaign
 
 CHARACTER = ("name", "concept", "appearance", "skills", "condition", "companions")
-GEAR = ("money", "gear", "assets")
+GEAR = ("money", "loans", "gear", "assets")
 JOURNAL = ("obligations",)
 
 

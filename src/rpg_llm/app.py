@@ -112,6 +112,10 @@ class Runtime:
                     changed = await sheet.update(c, self.router)
                 if changed:
                     st["last_sheet"] = {**changed, "at": time.time()}
+                # a payment the sheet refused: the GM hears about it next turn
+                st["money_refused"] = ({"refused": changed["refused"], "money": changed["money"],
+                                        "after": c.messages()[-1]["id"]}
+                                       if changed and changed.get("refused") else None)
             except Exception as e:
                 log.exception("sheet update failed")
                 st["error"] = f"character sheet: {e}"
@@ -282,7 +286,11 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     notes, info = await router.gatekeep(c, gate_router, user["content"], last_reply,
                                         rt.settings.tuning.gatekeeper_timeout)
     info["seconds"] = round(time.time() - t0, 1)
+    refused = st.get("money_refused")
+    if refused and refused["after"] != (messages[-2]["id"] if len(messages) > 1 else None):
+        refused = None  # only for the turn right after it
     notes = "\n\n".join(p for p in (context.style_reminder(c.meta), sheet.notes_block(sheet.load(c)),
+                                     sheet.money_note(refused),
                                      cast.notes_block(c, messages), notes) if p) or None
     info["notes"] = notes
     st["last_context"] = info
@@ -848,6 +856,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def put_character(slug: str, body: dict):
         rt = R()
         c = rt.campaign(slug)
+        if (sheet.amount(str(body.get("money") or "")) or 0) < 0:
+            raise HTTPException(400, "Money can't go below zero: put money you owe under Loans.")
         msgs = c.messages()
         async with rt.lock(slug):
             saved = sheet.save(c, body, msgs[-1]["id"] if msgs else 0, sheet.PLAYER_EDIT)

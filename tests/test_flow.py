@@ -558,10 +558,11 @@ def test_auto_dice_turn_rolls_real_dice_and_records_them(tmp_path):
 
 # ---- character sheet --------------------------------------------------------
 
-def sheet_reply(changed=True, **fields):
+def sheet_reply(changed=True, payments=(), **fields):
     from rpg_llm import sheet
     s = {**sheet.blank(), "name": "Mara", "money": "Cr 500", **fields}
-    return {"changes": ["spent Cr 100"] if changed else [], "changed": changed, "sheet": s}
+    return {"changes": ["spent Cr 100"] if changed else [], "changed": changed,
+            "payments": list(payments), "sheet": s}
 
 
 async def test_sheet_updates_rewinds_and_reaches_the_gm(vault):
@@ -574,8 +575,9 @@ async def test_sheet_updates_rewinds_and_reaches_the_gm(vault):
     play(c, ("I look around", "Quiet."))
     assert await sheet.update(c, FakeLLM([sheet_reply(changed=False, gear=["medkit"])]), "sys") is None
     assert len(sheet.history(c)) == 1
-    play(c, ("I sell the medkit", "Sold."))
-    await sheet.update(c, FakeLLM([sheet_reply(money="Cr 600")]), "sys")
+    play(c, ("I sell the medkit", "Sold for 100 credits."))
+    await sheet.update(c, FakeLLM([sheet_reply(payments=[{"amount": 100, "direction": "in",
+                                                           "what": "medkit"}])]), "sys")
     assert sheet.load(c)["gear"] == [] and sheet.load(c)["money"] == "Cr 600"
     # taking back the last exchange restores the sheet from before it
     assert sheet.rewind(c, 5)
@@ -1142,6 +1144,7 @@ async def test_sheet_money_only_changes_when_the_exchange_is_about_money(vault):
     sheet.save(c, {"name": "Callen", "money": "259 Cr"}, 0, "x")
     play(c, ("Any advice on digging out the ship?", "Kess suggests Marta; she rents clean gear."))
     llm = FakeLLM([{"changes": ["Received 20 Cr"], "changed": True,
+                    "payments": [{"amount": 20, "direction": "in", "what": "valve"}],
                     "sheet": {**sheet.blank(), "name": "Callen", "money": "279 Cr"}}])
     await sheet.update(c, llm)
     assert sheet.load(c)["money"] == "259 Cr"
@@ -1164,9 +1167,37 @@ async def test_money_never_goes_below_zero(vault):
     c = vault.create("T")
     sheet.save(c, {"name": "Callen", "money": "121 Cr", "gear": ["truck"]}, 0, "x")
     play(c, ("I pay Kess", "You settle the final eighteen hundred credits."))
-    llm = FakeLLM([{"changes": ["Paid 1800 Cr"], "changed": True,
-                    "sheet": {**sheet.blank(), "name": "Callen", "money": "-1,679 Cr", "gear": ["truck", "certificate"]}}])
+    bad = {"changes": ["Paid 1800 Cr"], "changed": True,
+           "payments": [{"amount": 1800, "direction": "out", "what": "registration"}],
+           "sheet": {**sheet.blank(), "name": "Callen", "money": "121 Cr", "gear": ["truck", "certificate"]}}
+    llm = FakeLLM([bad, bad])  # still wrong after the recheck
     r = await sheet.update(c, llm)
     s = sheet.load(c)
     assert s["money"] == "121 Cr" and "certificate" in s["gear"]
-    assert any("-1,679" in x and "check it" in x for x in r["changes"])
+    assert any("-1679" in x and "check it" in x for x in r["changes"])
+    assert "Check that again" in llm.calls[1][1][-1]["content"]
+    assert "Put it right in the story" in sheet.money_note(r)
+
+
+async def test_a_recheck_can_fix_a_misread_amount(vault):
+    c = vault.create("T")
+    sheet.save(c, {"name": "Callen", "money": "121 Cr"}, 0, "x")
+    play(c, ("I pay Kess", "You settle the final eighteen hundred credits."))
+    llm = FakeLLM([{"changes": ["Paid 1800 Cr"], "changed": True,
+                    "payments": [{"amount": 1800, "direction": "out", "what": "registration"}],
+                    "sheet": {**sheet.blank(), "name": "Callen", "money": "121 Cr"}},
+                   {"changes": ["Paid 121 Cr; borrowed the rest"], "changed": True,
+                    "payments": [{"amount": 121, "direction": "out", "what": "registration"}],
+                    "sheet": {**sheet.blank(), "name": "Callen", "money": "121 Cr",
+                              "loans": ["Owe Kess 59 Cr"]}}])
+    r = await sheet.update(c, llm)
+    assert sheet.load(c)["money"] == "0 Cr" and sheet.load(c)["loans"] == ["Owe Kess 59 Cr"]
+    assert "refused" not in r and any("rechecked" in x for x in r["changes"])
+
+
+def test_payments_are_added_up_in_code():
+    assert sheet.apply_payments("404 Cr", [{"amount": 11, "direction": "in"}]) == "415 Cr"
+    assert sheet.apply_payments("Cr 1,250", [{"amount": 300, "direction": "out"},
+                                             {"amount": 50.5, "direction": "in"}]) == "Cr 1,000.50"
+    assert sheet.apply_payments("12 gp", []) == "12 gp"
+    assert sheet.apply_payments("unknown", [{"amount": 5, "direction": "in"}]) is None
