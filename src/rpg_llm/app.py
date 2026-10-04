@@ -7,13 +7,13 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import (admin, arc, cast, compactor, context, dice, images, panels, portrait,
-                     prompts, router, sheet, suggest, themes, wiki)
+from rpg_llm import (admin, arc, auth, cast, compactor, context, dice, images, panels,
+                     portrait, prompts, router, sheet, suggest, themes, wiki)
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -47,6 +47,7 @@ class Runtime:
         self.casting: set[str] = set()  # campaigns whose cast is being brought up to date
         self.painting: set[str] = set()  # campaigns whose people are being painted
         self.images_down_until = 0.0
+        self.throttle = auth.Throttle()
         self.reload()
 
     def reload(self) -> None:
@@ -86,10 +87,28 @@ class Runtime:
         t.add_done_callback(self.tasks.discard)
 
     def campaign(self, slug: str) -> Campaign:
+        """The one lookup every campaign endpoint goes through: someone else's campaign is
+        'not found', the same as one that doesn't exist."""
         try:
-            return self.vault.get(slug)
+            c = self.vault.get(slug)
         except KeyError:
             raise HTTPException(404, f"no campaign {slug!r}")
+        if not auth.may_open(c.meta):
+            raise HTTPException(404, f"no campaign {slug!r}")
+        return c
+
+    def mine(self) -> list[Campaign]:
+        """The current user's campaigns (everyone's while no accounts exist)."""
+        return [c for c in self.vault.campaigns() if auth.may_open(c.meta)]
+
+    def adopt_unowned(self, username: str) -> int:
+        """Give campaigns from before accounts existed to this user (the first admin)."""
+        n = 0
+        for c in self.vault.campaigns():
+            if not c.meta.get("owner"):
+                c.save_meta({**c.meta, "owner": username})
+                n += 1
+        return n
 
     # ---- background jobs ----------------------------------------------------
 
@@ -572,6 +591,16 @@ class PeopleIn(BaseModel):
     people: list[dict]
 
 
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class PasswordIn(BaseModel):
+    current: str
+    new: str
+
+
 class Say(BaseModel):
     content: str
 
@@ -580,6 +609,9 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.rt = app.state.rt if hasattr(app.state, "rt") else Runtime(Settings.load())
+        admins = app.state.rt.settings.app.admins()
+        if admins:  # campaigns made before accounts (or by hand on disk) belong to the admin
+            app.state.rt.adopt_unowned(admins[0].username)
         idle = asyncio.create_task(app.state.rt.idle_loop())
         yield
         idle.cancel()
@@ -590,6 +622,61 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
 
     def R() -> Runtime:
         return app.state.rt
+
+    auth.install(app, lambda: R().settings.app)
+
+    @app.get("/login")
+    def login_page():
+        return FileResponse(STATIC / "login.html")
+
+    @app.get("/api/session")
+    async def session():
+        cfg = R().settings.app
+        u = auth.current()
+        return {"accounts": bool(cfg.users), "user": u.username if u else None,
+                "role": u.role if u else ("admin" if not cfg.users else None)}
+
+    @app.post("/api/login")
+    async def login(body: LoginIn, request: Request):
+        rt = R()
+        cfg = rt.settings.app
+        keys = (f"user:{body.username.strip().lower()}", f"ip:{auth.client_address(request)}")
+        wait = rt.throttle.wait(*keys)
+        if wait:
+            raise HTTPException(429, f"Too many attempts: try again in {max(1, wait // 60)} minute(s).")
+        u = cfg.user(body.username)
+        from rpg_llm.config import password_matches
+        if u is None or not password_matches(u.password_hash, body.password):
+            rt.throttle.fail(*keys)
+            raise HTTPException(401, "Wrong username or password.")
+        rt.throttle.clear(keys[0])
+        response = JSONResponse({"ok": True, "user": u.username, "role": u.role})
+        auth.set_session(response, request, cfg, u)
+        return response
+
+    @app.post("/api/logout")
+    async def logout():
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(auth.COOKIE)
+        return response
+
+    @app.post("/api/account/password")
+    async def change_password(body: PasswordIn, request: Request):
+        rt = R()
+        cfg = rt.settings.app
+        u = auth.current()
+        if u is None:
+            raise HTTPException(400, "Logins aren't turned on.")
+        from rpg_llm.config import hash_password, password_matches
+        if not password_matches(u.password_hash, body.current):
+            raise HTTPException(401, "Your current password is wrong.")
+        if len(body.new) < auth.MIN_PASSWORD:
+            raise HTTPException(400, f"Use at least {auth.MIN_PASSWORD} characters.")
+        u.password_hash = hash_password(body.new)
+        rt.settings.save()
+        response = JSONResponse({"ok": True})
+        auth.set_session(response, request, cfg, u)  # other sessions end; this one carries on
+        return response
 
     @app.get("/")
     def index():
@@ -608,7 +695,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.get("/api/campaigns")
     async def list_campaigns():
         out = []
-        for c in R().vault.campaigns():
+        for c in R().mine():
             theme = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
             scene = c.load_state().current
             kinds = themes.settings(theme)
@@ -627,6 +714,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     @app.post("/api/campaigns")
     async def create_campaign(body: NewCampaign):
         c = R().vault.create(body.name, body.premise, body.system, body.dm_instructions)
+        if auth.current():
+            c.save_meta({**c.meta, "owner": auth.current().username})
         t = context.table({"consequences": body.consequences, "dice": body.dice,
                            "style": body.style, "length": body.length})
         theme = body.theme if body.theme in themes.THEMES or body.theme == themes.PLAIN \

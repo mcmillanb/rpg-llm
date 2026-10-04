@@ -87,6 +87,29 @@ class Tuning(BaseModel):
     pause_compact_minutes: float = Field(5.0, ge=0)
 
 
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(8)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000).hex()
+    return f"{salt}${digest}"
+
+
+def password_matches(stored: str | None, password: str) -> bool:
+    if not stored or "$" not in stored:
+        return False
+    salt, digest = stored.split("$", 1)
+    test = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000).hex()
+    return hmac.compare_digest(test, digest)
+
+
+class User(BaseModel):
+    """An account. The admin runs the server (models, users); players only see and manage
+    their own campaigns. With no users at all the app is open, as on a first run."""
+    username: str
+    password_hash: str
+    role: str = "player"  # "admin" or "player"
+    created: float = 0.0
+
+
 class AppConfig(BaseModel):
     servers: list[Server] = []
     dm: Role = Role()
@@ -94,8 +117,16 @@ class AppConfig(BaseModel):
     archiver: Role = Role()
     tuning: Tuning = Tuning()
     images: ImageGen = ImageGen()
-    admin_password_hash: str | None = None
-    secret: str = Field(default_factory=lambda: secrets.token_hex(16))  # signs admin cookies
+    users: list[User] = []
+    admin_password_hash: str | None = None  # the old single admin password; becomes user "admin"
+    secret: str = Field(default_factory=lambda: secrets.token_hex(16))  # signs session cookies
+
+    def user(self, username: str | None) -> User | None:
+        key = (username or "").strip().lower()
+        return next((u for u in self.users if u.username.lower() == key), None)
+
+    def admins(self) -> list[User]:
+        return [u for u in self.users if u.role == "admin"]
 
     def server(self, server_id: str | None) -> Server | None:
         return next((s for s in self.servers if s.id == server_id), None)
@@ -145,27 +176,6 @@ class AppConfig(BaseModel):
             raise NotConfigured(f"the {role} model is not set up")
         return ModelSlot(srv.base_url, r.model, srv.api_key or "none", r.context_window)
 
-    # ---- admin password ----------------------------------------------------
-
-    def set_password(self, password: str | None) -> None:
-        if not password:
-            self.admin_password_hash = None
-            return
-        salt = secrets.token_hex(8)
-        digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000).hex()
-        self.admin_password_hash = f"{salt}${digest}"
-
-    def check_password(self, password: str) -> bool:
-        if not self.admin_password_hash:
-            return True
-        salt, digest = self.admin_password_hash.split("$", 1)
-        test = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000).hex()
-        return hmac.compare_digest(test, digest)
-
-    def admin_token(self) -> str:
-        """Cookie value for a logged-in admin; changes whenever the password does."""
-        return hmac.new(self.secret.encode(), (self.admin_password_hash or "").encode(),
-                        "sha256").hexdigest()
 
 
 class NotConfigured(RuntimeError):
@@ -174,9 +184,13 @@ class NotConfigured(RuntimeError):
 
 def load_config(vault_path: Path) -> AppConfig:
     p = vault_path / CONFIG_FILE
-    if p.exists():
-        return AppConfig.model_validate(yaml.safe_load(p.read_text()) or {})
-    return AppConfig()
+    if not p.exists():
+        return AppConfig()
+    cfg = AppConfig.model_validate(yaml.safe_load(p.read_text()) or {})
+    if cfg.admin_password_hash and not cfg.users:  # the old admin password: now an account
+        cfg.users = [User(username="admin", password_hash=cfg.admin_password_hash, role="admin")]
+        cfg.admin_password_hash = None
+    return cfg
 
 
 def save_config(vault_path: Path, cfg: AppConfig) -> None:

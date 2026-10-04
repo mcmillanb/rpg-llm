@@ -1,7 +1,9 @@
 """Admin API: first-run setup, model servers and roles, tuning, campaign management, imports.
 
-Everything here is behind the optional admin password (a signed cookie). With no password set,
-admin is open, which is what a first run needs.
+Server settings (model connections, image generation, tuning) and accounts are for the admin.
+Campaign management (settings, wiki rebuild, story arc, import) is for each campaign's owner:
+it goes through Runtime.campaign, which only finds the current user's campaigns. With no
+accounts at all (a first run) everything is open, and the admin page offers to turn logins on.
 """
 
 import re
@@ -9,15 +11,16 @@ import secrets
 import time
 
 import httpx2
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from rpg_llm import arc, compactor, context, images, router, suggest, themes
-from rpg_llm.config import ROLES, AppConfig, ImageGen, NotConfigured, Role, Server, Tuning
+from rpg_llm import arc, auth, compactor, context, images, router, suggest, themes
+from rpg_llm.config import (ROLES, AppConfig, ImageGen, NotConfigured, Role, Server, Tuning, User,
+                            hash_password)
 from rpg_llm.importers import openwebui
 from rpg_llm.llm import LLMClient
 
-COOKIE = "rpg_admin"
 MASK = "••••••"
 
 
@@ -32,12 +35,12 @@ class ConfigIn(BaseModel):
     archiver: Role
     tuning: Tuning
     images: ImageGen = ImageGen()
-    new_password: str | None = None
-    clear_password: bool = False
 
 
-class Login(BaseModel):
-    password: str
+class UserIn(BaseModel):
+    username: str
+    password: str = ""
+    role: str = "player"
 
 
 class Probe(BaseModel):
@@ -84,21 +87,15 @@ def _merge(body: ConfigIn, old: AppConfig) -> AppConfig:
     img = body.images
     if img.api_key.startswith(MASK):
         img = img.model_copy(update={"api_key": old.images.api_key})
-    new = old.model_copy(update={"servers": servers, "dm": body.dm, "router": body.router,
-                                 "archiver": body.archiver, "tuning": body.tuning, "images": img})
-    if body.clear_password:
-        new.set_password(None)
-    elif body.new_password:
-        new.set_password(body.new_password)
-    return new
+    return old.model_copy(update={"servers": servers, "dm": body.dm, "router": body.router,
+                                  "archiver": body.archiver, "tuning": body.tuning, "images": img})
 
 
 def _public(cfg: AppConfig) -> dict:
-    d = cfg.model_dump(exclude={"admin_password_hash", "secret"})
+    d = cfg.model_dump(exclude={"admin_password_hash", "secret", "users"})
     for s in d["servers"]:
         s["api_key"] = _mask(s["api_key"])
     d["images"]["api_key"] = _mask(d["images"]["api_key"])
-    d["has_password"] = bool(cfg.admin_password_hash)
     d["missing"] = cfg.missing()
     d["warnings"] = cfg.warnings()
     return d
@@ -198,48 +195,100 @@ async def _test_role(cfg: AppConfig, role: str) -> dict:
 def register(app: FastAPI, R) -> None:
     """Add the admin routes. `R()` returns the live Runtime."""
 
-    def guard(request: Request) -> None:
-        cfg = R().settings.app
-        if cfg.admin_password_hash and request.cookies.get(COOKIE) != cfg.admin_token():
-            raise HTTPException(401, "admin login required")
+    def guard() -> None:  # server settings: the admin only (anyone before accounts exist)
+        auth.require_admin(R().settings.app)
 
-    auth = [Depends(guard)]
+    admin_only = [Depends(guard)]
 
-    def set_cookie(response: Response, cfg: AppConfig) -> None:
-        if cfg.admin_password_hash:
-            response.set_cookie(COOKIE, cfg.admin_token(), httponly=True, samesite="strict",
-                                max_age=30 * 24 * 3600)
+    # ---- accounts -------------------------------------------------------------
 
-    @app.post("/api/admin/login")
-    async def login(body: Login, response: Response):
-        cfg = R().settings.app
-        if not cfg.check_password(body.password):
-            raise HTTPException(401, "wrong password")
-        set_cookie(response, cfg)
-        return {"ok": True}
+    def users_out(cfg: AppConfig) -> list[dict]:
+        me = auth.current()
+        return [{"username": u.username, "role": u.role, "created": u.created,
+                 "me": bool(me and me.username == u.username)} for u in cfg.users]
 
-    @app.post("/api/admin/logout")
-    async def logout(response: Response):
-        response.delete_cookie(COOKIE)
-        return {"ok": True}
+    @app.get("/api/admin/users", dependencies=admin_only)
+    async def list_users():
+        return users_out(R().settings.app)
+
+    @app.post("/api/admin/users", dependencies=admin_only)
+    async def add_user(body: UserIn, request: Request):
+        """Add an account. The first one turns logins on: it's the admin, it's logged in at
+        once, and the campaigns made so far become its own."""
+        rt = R()
+        cfg = rt.settings.app
+        name = body.username.strip()
+        if not auth.USERNAME.match(name):
+            raise HTTPException(400, "Usernames are 2-32 letters, digits, dots, dashes or underscores.")
+        if cfg.user(name):
+            raise HTTPException(400, f"There's already an account called {name}.")
+        if len(body.password) < auth.MIN_PASSWORD:
+            raise HTTPException(400, f"Use a password of at least {auth.MIN_PASSWORD} characters.")
+        first = not cfg.users
+        u = User(username=name, password_hash=hash_password(body.password),
+                 role="admin" if first or body.role == "admin" else "player", created=time.time())
+        cfg.users.append(u)
+        rt.settings.save()
+        if not first:
+            return JSONResponse({"users": users_out(cfg), "first": False})
+        rt.adopt_unowned(u.username)
+        auth.CURRENT.set(u)  # this browser is the new admin from here on
+        response = JSONResponse({"users": users_out(cfg), "first": True})
+        auth.set_session(response, request, cfg, u)
+        return response
+
+    @app.put("/api/admin/users/{username}", dependencies=admin_only)
+    async def edit_user(username: str, body: UserIn):
+        """Reset someone's password and/or change their role."""
+        rt = R()
+        cfg = rt.settings.app
+        u = cfg.user(username)
+        if u is None:
+            raise HTTPException(404, "no such account")
+        if body.password:
+            if len(body.password) < auth.MIN_PASSWORD:
+                raise HTTPException(400, f"Use a password of at least {auth.MIN_PASSWORD} characters.")
+            u.password_hash = hash_password(body.password)
+        if body.role in ("admin", "player") and body.role != u.role:
+            if u.role == "admin" and len(cfg.admins()) == 1:
+                raise HTTPException(400, "There has to be at least one admin.")
+            u.role = body.role
+        rt.settings.save()
+        return users_out(cfg)
+
+    @app.delete("/api/admin/users/{username}", dependencies=admin_only)
+    async def remove_user(username: str):
+        """Remove an account. Its campaigns stay on disk (in the vault) but nobody can open them."""
+        rt = R()
+        cfg = rt.settings.app
+        u = cfg.user(username)
+        if u is None:
+            raise HTTPException(404, "no such account")
+        me = auth.current()
+        if me and me.username == u.username:
+            raise HTTPException(400, "You can't remove your own account.")
+        if u.role == "admin" and len(cfg.admins()) == 1:
+            raise HTTPException(400, "There has to be at least one admin.")
+        cfg.users.remove(u)
+        rt.settings.save()
+        return users_out(cfg)
 
     # ---- config ---------------------------------------------------------------
 
-    @app.get("/api/admin/config", dependencies=auth)
+    @app.get("/api/admin/config", dependencies=admin_only)
     async def get_config():
         return _public(R().settings.app)
 
-    @app.put("/api/admin/config", dependencies=auth)
-    async def put_config(body: ConfigIn, response: Response):
+    @app.put("/api/admin/config", dependencies=admin_only)
+    async def put_config(body: ConfigIn):
         rt = R()
         new = _merge(body, rt.settings.app)
         rt.settings.app = new
         rt.settings.save()
         rt.reload()
-        set_cookie(response, new)  # changing the password keeps this browser logged in
         return _public(new)
 
-    @app.post("/api/admin/probe", dependencies=auth)
+    @app.post("/api/admin/probe", dependencies=admin_only)
     async def probe(body: Probe):
         key = body.api_key
         if key.startswith(MASK):
@@ -247,14 +296,14 @@ def register(app: FastAPI, R) -> None:
             key = prev.api_key if prev else ""
         return await _list_models(body.base_url, key)
 
-    @app.post("/api/admin/test/{role}", dependencies=auth)
+    @app.post("/api/admin/test/{role}", dependencies=admin_only)
     async def test_role(role: str, body: ConfigIn):
         """Tests the role as configured in the (possibly unsaved) form."""
         if role not in ROLES:
             raise HTTPException(404, "unknown role")
         return await _test_role(_merge(body, R().settings.app), role)
 
-    @app.post("/api/admin/test-images", dependencies=auth)
+    @app.post("/api/admin/test-images", dependencies=admin_only)
     async def test_images(body: ConfigIn):
         """Paint one small test portrait with the (possibly unsaved) image settings."""
         cfg = _merge(body, R().settings.app).images
@@ -270,15 +319,15 @@ def register(app: FastAPI, R) -> None:
 
     # ---- campaigns ------------------------------------------------------------
 
-    @app.get("/api/admin/themes", dependencies=auth)
+    @app.get("/api/admin/themes")
     async def list_themes():
         return {"plain": "Plain", **{k: v["label"] for k, v in themes.public().items()}}
 
-    @app.get("/api/admin/campaigns", dependencies=auth)
+    @app.get("/api/admin/campaigns")
     async def campaigns():
         rt = R()
         out = []
-        for c in rt.vault.campaigns():
+        for c in rt.mine():
             state = c.load_state()
             out.append({
                 "slug": c.slug, **{k: c.meta.get(k, "") for k in
@@ -294,7 +343,7 @@ def register(app: FastAPI, R) -> None:
             })
         return out
 
-    @app.patch("/api/admin/campaigns/{slug}", dependencies=auth)
+    @app.patch("/api/admin/campaigns/{slug}")
     async def edit_campaign(slug: str, body: CampaignEdit):
         rt = R()
         c = rt.campaign(slug)
@@ -315,7 +364,7 @@ def register(app: FastAPI, R) -> None:
             c.write("brief.md", f"# {body.name}\n\n## Premise\n\n{body.premise.strip() or '(not set)'}\n")
         return {"ok": True}
 
-    @app.delete("/api/admin/campaigns/{slug}", dependencies=auth)
+    @app.delete("/api/admin/campaigns/{slug}")
     async def delete_campaign(slug: str):
         """Moves the campaign folder to <vault>/trash/ rather than deleting it."""
         rt = R()
@@ -324,7 +373,7 @@ def register(app: FastAPI, R) -> None:
             raise HTTPException(409, "the campaign is being filed; try again shortly")
         return {"ok": True, "moved_to": str(rt.vault.trash(c))}
 
-    @app.post("/api/admin/campaigns/{slug}/rebuild", dependencies=auth)
+    @app.post("/api/admin/campaigns/{slug}/rebuild")
     async def rebuild(slug: str):
         rt = R()
         rt.require_configured()
@@ -334,14 +383,14 @@ def register(app: FastAPI, R) -> None:
         return start_job(rt, "rebuild", c, f"Rebuild wiki: {c.meta.get('name')}",
                          lambda job: _rebuild(rt, c, job))
 
-    @app.get("/api/admin/campaigns/{slug}/arc", dependencies=auth)
+    @app.get("/api/admin/campaigns/{slug}/arc")
     async def get_arc(slug: str):
         c = R().campaign(slug)
         hist = sorted(p.name for p in c.path(arc.HISTORY_DIR).glob("*.md")) \
             if c.path(arc.HISTORY_DIR).exists() else []
         return {"text": c.read(arc.FILE), "versions": len(hist)}
 
-    @app.post("/api/admin/campaigns/{slug}/arc", dependencies=auth)
+    @app.post("/api/admin/campaigns/{slug}/arc")
     async def new_arc(slug: str):
         rt = R()
         rt.require_configured()
@@ -355,7 +404,7 @@ def register(app: FastAPI, R) -> None:
 
     # ---- import ---------------------------------------------------------------
 
-    @app.post("/api/admin/import/inspect", dependencies=auth)
+    @app.post("/api/admin/import/inspect")
     async def inspect(file: UploadFile = File(...)):
         rt = R()
         uploads = rt.vault.root / ".uploads"
@@ -377,7 +426,7 @@ def register(app: FastAPI, R) -> None:
                         "last": max(ts) if ts else None})
         return {"token": token, "chats": out}
 
-    @app.post("/api/admin/import", dependencies=auth)
+    @app.post("/api/admin/import")
     async def do_import(body: ImportIn):
         rt = R()
         rt.require_configured()
@@ -391,13 +440,16 @@ def register(app: FastAPI, R) -> None:
             raise HTTPException(400, "no such chat in the export")
         c = openwebui.import_chat(rt.vault, chats[body.chat], body.name or None, body.system,
                                   body.premise)
+        if auth.current():
+            c.save_meta({**c.meta, "owner": auth.current().username})
         path.unlink(missing_ok=True)
         return start_job(rt, "import", c, f"Import: {c.meta.get('name')}",
                          lambda job: _process_import(rt, c, job, body.file_scenes))
 
-    @app.get("/api/admin/jobs", dependencies=auth)
+    @app.get("/api/admin/jobs")
     async def jobs():
-        return sorted(R().jobs.values(), key=lambda j: -j["started"])
+        mine = {c.slug for c in R().mine()}
+        return sorted((j for j in R().jobs.values() if j["slug"] in mine), key=lambda j: -j["started"])
 
 
 # ---- jobs -------------------------------------------------------------------

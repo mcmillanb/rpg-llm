@@ -331,6 +331,10 @@ body[data-look] #drawer { backdrop-filter: blur(10px); }
 .pcard.here { border-color: var(--accent); }
 .drawer-md p { margin: 0 0 .6em; } .drawer-md ul { margin: 0 0 .6em; padding-left: 1.2em; }
 #drawer details summary { cursor: pointer; }
+#userMenu { position: fixed; top: 54px; right: 12px; z-index: 25; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 26px rgba(0,0,0,.25);
+  display: flex; flex-direction: column; gap: 8px; min-width: 190px; }
+#userMenu a { color: var(--accent); cursor: pointer; text-decoration: none; }
 #diceBtn { font-size: 16px; padding: 6px 10px; }
 body[data-viewart] #diceBtn { opacity: 0; pointer-events: none; }
 #tray { position: fixed; z-index: 15; bottom: 92px; right: max(16px, 10%); width: min(380px, calc(100% - 32px));
@@ -355,6 +359,7 @@ body[data-look] #tray { backdrop-filter: blur(10px); }
     <button id="newBtn" class="primary hidden">+ New campaign</button>
     <button id="themeBtn" title="Light / dark">☾</button>
     <a href="/admin" title="Settings"><button>⚙</button></a>
+    <button id="userBtn" class="hidden" title="Account">👤</button>
   </header>
   <main id="main"><div class="wrap" id="view"></div></main>
   <footer id="footer" class="hidden">
@@ -395,6 +400,11 @@ body[data-look] #tray { backdrop-filter: blur(10px); }
 <div id="lightbox" class="hidden" role="dialog" aria-label="Portrait">
   <figure><img id="lbImg" alt=""><figcaption class="ui"><strong id="lbName"></strong> <span id="lbWho" class="muted"></span>
     <div><a id="lbPeople">Open in People</a></div></figcaption></figure>
+</div>
+<div id="userMenu" class="hidden ui">
+  <div class="muted small" id="userName"></div>
+  <a href="/admin">My games and password</a>
+  <a id="logoutLink">Log out</a>
 </div>
 <div id="modal" class="hidden"></div>
 <aside id="drawer">
@@ -455,8 +465,10 @@ function md(src) {
 }
 
 // ---- api -----------------------------------------------------------------
+function toLogin() { location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search); }
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (r.status === 401) { toLogin(); throw new Error("Please log in again."); }
   if (!r.ok) {
     const text = await r.text();
     let msg = text; try { msg = JSON.parse(text).detail || text; } catch {}
@@ -468,6 +480,7 @@ async function api(path, opts = {}) {
 async function streamPost(path, body, handlers, signal) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
                                 body: body ? JSON.stringify(body) : undefined, signal });
+  if (r.status === 401) { toLogin(); throw new Error("Please log in again."); }
   if (!r.ok) throw new Error((await r.text()) || r.statusText);
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
   for (;;) {
@@ -1611,7 +1624,14 @@ $("closeDrawer").onclick = closePanel;
 $("pinBtn").onclick = () => setPinned(!document.body.dataset.pinned);
 try { setPinned(localStorage.getItem("pinned") === "1"); } catch {}
 placeRail();
+$("userBtn").onclick = (e) => { e.stopPropagation(); $("userMenu").classList.toggle("hidden"); };
+document.addEventListener("click", (e) => { if (!$("userMenu").contains(e.target)) $("userMenu").classList.add("hidden"); });
+$("logoutLink").onclick = async () => { await api("/api/logout", { method: "POST" }); location.href = "/login"; };
 (async () => {
+  try {
+    const me = await api("/api/session");
+    if (me.user) { $("userBtn").classList.remove("hidden"); $("userBtn").title = me.user; $("userName").textContent = `Logged in as ${me.user}`; }
+  } catch {}
   try {
     const st = await api("/api/status");
     if (!st.configured) { location.href = "/admin"; return; }  // first run: set up models first

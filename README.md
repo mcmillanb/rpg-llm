@@ -102,6 +102,28 @@ The admin page also has the tuning values, an optional admin password, campaign 
 | Recall before every turn | on | the router's per-turn check (name matching still runs when off) |
 | Recall timeout | 30 s | the turn goes ahead without it after this |
 
+## Accounts and running it on the internet
+
+Out of the box there are no accounts: anyone who can reach the server can play every game and
+change the settings. That's fine on your own network. Before exposing it, open **admin →
+Accounts → Turn on logins** and create your admin account. From then on:
+
+- every page and API call needs a login (a signed session cookie, 30 days); the login page is
+  `/login`, and after 5 wrong passwords for a username or address it waits 15 minutes;
+- each person sees and manages only their own campaigns, the admin included; someone else's
+  campaign is "not found", even by its address. The games made before logins were turned on
+  become the admin's;
+- the admin also manages the server (model connections, image generation, tuning) and the
+  accounts (add someone with a password you give them, reset a password, remove an account:
+  its games stay in the vault but nobody can open them). Players get "My games" in the admin
+  page: their campaigns' settings, wiki tools, story arc, the Open WebUI import, and their
+  password.
+
+Behind a reverse proxy (Traefik, Caddy, nginx), terminate HTTPS at the proxy and forward to
+the app's port; the session cookie is marked secure when the proxy says the request came over
+HTTPS (`X-Forwarded-Proto`). Accounts, hashed passwords and the cookie-signing secret live in
+`vault/config.yaml` (owner-only permissions), so back up the vault.
+
 ## Importing an Open WebUI chat
 
 In the admin page, choose the export file (a chat's "Export chat (.json)", or Settings → Chats →
@@ -117,7 +139,7 @@ resume an interrupted import.
 
 ```
 vault/campaigns/<campaign>/
-  campaign.yaml      name, system, premise, GM instructions, consequences, dice, rewinds
+  campaign.yaml      name, owner, system, premise, GM instructions, consequences, dice, rewinds
   brief.md           always in the GM's context
   arc.md             hidden story arc (GM only); earlier versions in arc-history/
   character.yaml     character sheet; every version in character.history.jsonl

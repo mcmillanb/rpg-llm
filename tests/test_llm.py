@@ -94,11 +94,20 @@ def test_one_model_at_a_time_server_warns_when_roles_would_swap():
     assert not c.warnings()
 
 
-def test_password_and_config_round_trip(tmp_path):
+def test_accounts_round_trip_and_the_old_admin_password_becomes_an_account(tmp_path):
+    from rpg_llm.config import User, hash_password, password_matches
     c = config(dm=Role(server="box", model="big"))
-    c.set_password("hunter2")
+    c.users = [User(username="billy", password_hash=hash_password("hunter2!"), role="admin")]
     save_config(tmp_path, c)
     loaded = load_config(tmp_path)
-    assert loaded.check_password("hunter2") and not loaded.check_password("nope")
-    assert loaded.admin_token() == c.admin_token()
+    assert password_matches(loaded.user("BILLY").password_hash, "hunter2!")
+    assert not password_matches(loaded.user("billy").password_hash, "nope")
     assert (tmp_path / "config.yaml").stat().st_mode & 0o077 == 0  # API keys: owner-only
+    old = config(dm=Role(server="box", model="big"))
+    old.admin_password_hash = hash_password("pw123456")
+    save_config(tmp_path, old)
+    migrated = load_config(tmp_path)
+    assert [(u.username, u.role) for u in migrated.users] == [("admin", "admin")]
+    assert password_matches(migrated.users[0].password_hash, "pw123456")
+
+

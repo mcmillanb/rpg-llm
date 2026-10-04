@@ -393,17 +393,65 @@ def test_first_run_blocks_play_until_admin_setup(tmp_path):
         assert (tmp_path / "config.yaml").exists()
 
 
-def test_admin_password_locks_admin_api(tmp_path):
-    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()))
+def test_turning_logins_on_makes_everything_private(tmp_path):
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig()), dm=FakeLLM(),
+                 router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as admin_c, TestClient(create_app(rt)) as son, \
+            TestClient(create_app(rt)) as stranger:
+        # open (no accounts): a game made now becomes the admin's when logins are turned on
+        old = admin_c.post("/api/campaigns", json={"name": "Ship in the shed"}).json()["slug"]
+        assert admin_c.get("/api/session").json() == {"accounts": False, "user": None, "role": "admin"}
+        r = admin_c.post("/api/admin/users", json={"username": "billy", "password": "s3cret-pass"})
+        assert r.status_code == 200 and r.json()["first"]
+        assert rt.vault.get(old).meta["owner"] == "billy"
+        assert admin_c.get("/api/session").json()["user"] == "billy"  # logged in at once
+        admin_c.post("/api/admin/users", json={"username": "sam", "password": "another-pass"})
+
+        # strangers get nothing: API 401, pages go to the login page
+        assert stranger.get("/api/campaigns").status_code == 401
+        assert stranger.get(f"/api/campaigns/{old}").status_code == 401
+        page = stranger.get("/", follow_redirects=False)
+        assert page.status_code == 303 and page.headers["location"].startswith("/login")
+        assert stranger.get("/login").status_code == 200
+        assert stranger.post("/api/login", json={"username": "billy", "password": "nope"}).status_code == 401
+
+        # the son logs in and sees only his own games
+        assert son.post("/api/login", json={"username": "Sam", "password": "another-pass"}).status_code == 200
+        assert son.get("/api/campaigns").json() == []
+        mine = son.post("/api/campaigns", json={"name": "Dragon hunt"}).json()["slug"]
+        assert [c["slug"] for c in son.get("/api/campaigns").json()] == [mine]
+        assert [c["slug"] for c in admin_c.get("/api/campaigns").json()] == [old]  # admin can't see it
+        for path in (f"/api/campaigns/{old}", f"/api/campaigns/{old}/status", f"/api/campaigns/{old}/people",
+                     f"/api/campaigns/{old}/character", f"/api/campaigns/{old}/file?path=brief.md",
+                     f"/api/admin/campaigns/{old}/arc"):
+            assert son.get(path).status_code == 404, path  # someone else's game: "not found"
+        assert son.post(f"/api/campaigns/{old}/chat", json={"content": "hi"}).status_code == 404
+        assert son.delete(f"/api/campaigns/{old}").status_code == 404
+        assert admin_c.get(f"/api/campaigns/{mine}").status_code == 404
+        assert [c["slug"] for c in son.get("/api/admin/campaigns").json()] == [mine]
+
+        # server settings and accounts: the admin only
+        assert son.get("/api/admin/config").status_code == 403
+        assert son.get("/api/admin/users").status_code == 403
+        assert son.post("/api/admin/users", json={"username": "x1", "password": "12345678"}).status_code == 403
+        assert admin_c.get("/api/admin/config").status_code == 200
+
+        # changing a password ends the old sessions
+        assert son.post("/api/account/password", json={"current": "another-pass", "new": "newer-pass1"}).status_code == 200
+        assert son.get("/api/campaigns").status_code == 200  # this browser carries on
+        assert admin_c.put("/api/admin/users/sam", json={"username": "sam", "password": "reset-by-dad"}).status_code == 200
+        assert son.get("/api/campaigns").status_code == 401
+        assert admin_c.delete("/api/admin/users/billy").status_code == 400  # not yourself
+
+
+def test_password_guessing_is_slowed_down(tmp_path):
+    from rpg_llm.config import User, hash_password
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig(users=[
+        User(username="billy", password_hash=hash_password("right-pass"), role="admin")])))
     with TestClient(create_app(rt)) as client:
-        client.put("/api/admin/config", json=form(new_password="pw"))  # this browser stays in
-        assert client.get("/api/admin/config").status_code == 200
-        client.post("/api/admin/logout")
-        client.cookies.clear()
-        assert client.get("/api/admin/config").status_code == 401
-        assert client.post("/api/admin/login", json={"password": "nope"}).status_code == 401
-        assert client.post("/api/admin/login", json={"password": "pw"}).status_code == 200
-        assert client.get("/api/admin/config").status_code == 200
+        for _ in range(5):
+            assert client.post("/api/login", json={"username": "billy", "password": "x"}).status_code == 401
+        assert client.post("/api/login", json={"username": "billy", "password": "right-pass"}).status_code == 429
 
 
 def test_delete_moves_campaign_to_trash(tmp_path):

@@ -29,7 +29,7 @@ body { background: linear-gradient(var(--wash), var(--wash)), url("/static/backd
 :root[data-theme="dark"] body { --wash: rgba(21,23,26,.9); --chrome: rgba(24,26,30,.55); --chrome-line: rgba(255,255,255,.06); }
 header, .savebar { background: var(--chrome) !important; backdrop-filter: blur(10px) saturate(1.1);
   border-color: var(--chrome-line) !important; }
-html, body { margin: 0; color: var(--ink);
+html, body { margin: 0; color: var(--ink); min-height: 100vh;
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 1px solid var(--line); background: var(--panel);
@@ -82,22 +82,18 @@ pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; 
 </head>
 <body>
 <header>
-  <h1>RPG LLM · Admin</h1>
+  <h1 id="pageTitle">RPG LLM · Admin</h1>
+  <span id="whoami" class="muted"></span>
   <a href="/" id="playLink">Play →</a>
   <button id="logout" class="hidden">Log out</button>
 </header>
 
 <div class="wrap">
-  <div id="login" class="card hidden">
-    <strong>Admin login</strong>
-    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
-    <div class="actions"><button class="primary" id="loginBtn">Log in</button><span id="loginMsg" class="bad"></span></div>
-  </div>
-
   <div id="main" class="hidden">
     <div id="setup" class="banner hidden"></div>
     <div id="warnings" class="banner hidden"></div>
 
+    <div id="serverSettings">
     <h2>Connections</h2>
     <p class="muted">Any OpenAI-compatible server: llama.cpp, LM Studio, Ollama, vLLM, LiteLLM, OpenAI…
       Each connection lists the models it offers. Add one per server, e.g. one llama.cpp instance per GPU.</p>
@@ -165,17 +161,22 @@ pre.arc { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; 
         Ask the router what to recall before every turn (catches indirect references; turn off to save calls on paid APIs)</label>
     </div>
 
-    <h2>Admin password</h2>
-    <div class="card">
-      <div class="muted" id="pwState"></div>
-      <div class="row">
-        <div><label>New password</label><input id="newPw" type="password" autocomplete="new-password"></div>
-        <div style="align-self:end"><label class="inline"><input type="checkbox" id="clearPw"> Remove the password</label></div>
-      </div>
-      <div class="muted" style="margin-top:6px">Protects this admin page. Playing stays open to anyone who can reach the server, so keep it on your own network.</div>
+    <h2>Accounts</h2>
+    <div class="card" id="accounts"></div>
     </div>
 
-    <h2>Campaigns</h2>
+    <div id="myAccount" class="hidden">
+      <h2>My account</h2>
+      <div class="card">
+        <div class="row">
+          <div><label>Current password</label><input id="pwOld" type="password" autocomplete="current-password"></div>
+          <div><label>New password</label><input id="pwNew" type="password" autocomplete="new-password"></div>
+        </div>
+        <div class="actions"><button id="pwChange">Change password</button><span id="pwMsg"></span></div>
+      </div>
+    </div>
+
+    <h2 id="campaignsTitle">Campaigns</h2>
     <div id="campaigns"></div>
 
     <h2>Import from Open WebUI</h2>
@@ -220,7 +221,7 @@ let dirty = false;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: opts.body instanceof FormData ? {} : { "Content-Type": "application/json" }, ...opts });
-  if (r.status === 401) { showLogin(); throw new Error("login required"); }
+  if (r.status === 401) { location.href = "/login?next=/admin"; throw new Error("login required"); }
   const text = await r.text();
   let data; try { data = JSON.parse(text); } catch { data = text; }
   if (!r.ok) throw new Error(data?.detail || text || r.statusText);
@@ -228,21 +229,28 @@ async function api(path, opts = {}) {
 }
 function markDirty() { dirty = true; $("saveMsg").textContent = "Unsaved changes"; }
 
-// ---- login -----------------------------------------------------------------
-function showLogin() { $("login").classList.remove("hidden"); $("main").classList.add("hidden"); $("savebar").classList.add("hidden"); $("pw").focus(); }
-$("loginBtn").onclick = async () => {
-  try { await api("/api/admin/login", { method: "POST", body: JSON.stringify({ password: $("pw").value }) }); $("login").classList.add("hidden"); load(); }
-  catch (e) { $("loginMsg").textContent = e.message; }
-};
-$("pw").addEventListener("keydown", e => { if (e.key === "Enter") $("loginBtn").click(); });
-$("logout").onclick = async () => { await api("/api/admin/logout", { method: "POST" }); location.reload(); };
+// ---- who's here ----------------------------------------------------------------
+let SESSION = { accounts: false, user: null, role: "admin" };
+$("logout").onclick = async () => { await api("/api/logout", { method: "POST" }); location.href = "/login"; };
 
 // ---- load ------------------------------------------------------------------
 async function load() {
+  SESSION = await api("/api/session");
+  const admin = SESSION.role === "admin";
+  $("logout").classList.toggle("hidden", !SESSION.user);
+  $("whoami").textContent = SESSION.user ? `${SESSION.user}${admin ? " (admin)" : ""}` : "";
+  $("myAccount").classList.toggle("hidden", !SESSION.user);
+  $("main").classList.remove("hidden");
+  if (!admin) {  // players: their own campaigns, the import and their password
+    $("serverSettings").classList.add("hidden");
+    $("pageTitle").textContent = "RPG LLM · My games";
+    $("campaignsTitle").textContent = "My campaigns";
+    loadCampaigns(); loadJobs();
+    return;
+  }
+  $("savebar").classList.remove("hidden");
   CFG = await api("/api/admin/config");
-  $("main").classList.remove("hidden"); $("savebar").classList.remove("hidden");
-  $("logout").classList.toggle("hidden", !CFG.has_password);
-  renderBanners(); renderServers(); renderRoles(); renderTuning(); renderImages(); renderPassword();
+  renderBanners(); renderServers(); renderRoles(); renderTuning(); renderImages(); renderAccounts();
   await Promise.all(CFG.servers.map(s => probe(s)));
   loadCampaigns(); loadJobs();
   dirty = false; $("saveMsg").textContent = "";
@@ -394,12 +402,68 @@ function renderTuning() {
   $("t_gatekeeper_enabled").checked = CFG.tuning.gatekeeper_enabled;
   $("t_gatekeeper_enabled").onchange = (e) => { CFG.tuning.gatekeeper_enabled = e.target.checked; markDirty(); };
 }
-function renderPassword() {
-  $("pwState").textContent = CFG.has_password ? "A password is set." : "No password set: anyone who can reach this page can change settings.";
-  $("newPw").value = ""; $("clearPw").checked = false;
-  $("newPw").oninput = markDirty; $("clearPw").onchange = markDirty;
-  $("clearPw").parentElement.classList.toggle("hidden", !CFG.has_password);
+// ---- accounts ---------------------------------------------------------------------
+async function renderAccounts() {
+  const box = $("accounts");
+  if (!SESSION.accounts) {
+    box.innerHTML = `<div class="banner" style="margin:0 0 10px">Logins are off: anyone who can reach this server can play every game and change these settings. Fine on your own network; turn logins on before putting it on the internet.</div>
+      <strong>Turn on logins</strong>
+      <div class="muted">Create your admin account. From then on everyone logs in, each person sees only their own games, and the games made so far become yours.</div>
+      <div class="row">
+        <div><label>Username</label><input id="nuName" autocomplete="username" autocapitalize="none"></div>
+        <div><label>Password <span class="muted">(8+ characters)</span></label><input id="nuPw" type="password" autocomplete="new-password"></div>
+      </div>
+      <div class="actions"><button class="primary" id="nuGo">Turn on logins</button><span id="nuMsg"></span></div>`;
+    $("nuGo").onclick = async () => {
+      try {
+        await api("/api/admin/users", { method: "POST", body: JSON.stringify({ username: $("nuName").value.trim(), password: $("nuPw").value }) });
+        location.reload();
+      } catch (e) { $("nuMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+    };
+    return;
+  }
+  const users = await api("/api/admin/users");
+  box.innerHTML = `<table style="width:100%;border-collapse:collapse">${users.map(u => `
+      <tr style="border-bottom:1px solid var(--line)"><td style="padding:6px 0"><strong>${esc(u.username)}</strong>${u.me ? ' <span class="muted">(you)</span>' : ""}</td>
+        <td><select data-role="${esc(u.username)}"><option value="player" ${u.role === "player" ? "selected" : ""}>player</option><option value="admin" ${u.role === "admin" ? "selected" : ""}>admin</option></select></td>
+        <td style="text-align:right"><button data-reset="${esc(u.username)}">Reset password</button> ${u.me ? "" : `<button data-del="${esc(u.username)}">Remove</button>`}</td></tr>`).join("")}</table>
+    <div class="muted" style="margin-top:6px">Players see and manage only their own games; admins also manage these settings and accounts. Nobody sees anyone else's games.</div>
+    <strong style="display:block;margin-top:14px">Add someone</strong>
+    <div class="row">
+      <div><label>Username</label><input id="nuName" autocomplete="off" autocapitalize="none"></div>
+      <div><label>Password <span class="muted">(8+ characters; give it to them)</span></label><input id="nuPw" type="text" autocomplete="off"></div>
+    </div>
+    <div class="actions"><button id="nuGo">Add account</button><span id="nuMsg"></span></div>`;
+  $("nuGo").onclick = async () => {
+    try {
+      await api("/api/admin/users", { method: "POST", body: JSON.stringify({ username: $("nuName").value.trim(), password: $("nuPw").value }) });
+      renderAccounts();
+    } catch (e) { $("nuMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  };
+  box.querySelectorAll("[data-role]").forEach(sel => sel.onchange = async () => {
+    try { await api(`/api/admin/users/${encodeURIComponent(sel.dataset.role)}`, { method: "PUT", body: JSON.stringify({ username: sel.dataset.role, role: sel.value }) }); }
+    catch (e) { alert(e.message); }
+    renderAccounts();
+  });
+  box.querySelectorAll("[data-reset]").forEach(b => b.onclick = async () => {
+    const pw = prompt(`New password for ${b.dataset.reset} (8+ characters). Their other sessions end.`);
+    if (!pw) return;
+    try { await api(`/api/admin/users/${encodeURIComponent(b.dataset.reset)}`, { method: "PUT", body: JSON.stringify({ username: b.dataset.reset, password: pw }) }); alert("Password changed."); }
+    catch (e) { alert(e.message); }
+  });
+  box.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if (!confirm(`Remove ${b.dataset.del}? Their games stay on disk but nobody can open them.`)) return;
+    try { await api(`/api/admin/users/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" }); } catch (e) { alert(e.message); }
+    renderAccounts();
+  });
 }
+$("pwChange").onclick = async () => {
+  try {
+    await api("/api/account/password", { method: "POST", body: JSON.stringify({ current: $("pwOld").value, new: $("pwNew").value }) });
+    $("pwOld").value = $("pwNew").value = "";
+    $("pwMsg").innerHTML = '<span class="ok">Changed ✓ (other devices will need to log in again)</span>';
+  } catch (e) { $("pwMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+};
 
 const IMG_FIELDS = ["kind", "base_url", "api_key", "model", "unet", "clip", "vae", "steps"];
 function renderImages() {
@@ -426,8 +490,7 @@ function showImageFields() {
 }
 
 function formBody() {
-  return { servers: CFG.servers, dm: CFG.dm, router: CFG.router, archiver: CFG.archiver, tuning: CFG.tuning, images: CFG.images,
-           new_password: $("newPw").value || null, clear_password: $("clearPw").checked };
+  return { servers: CFG.servers, dm: CFG.dm, router: CFG.router, archiver: CFG.archiver, tuning: CFG.tuning, images: CFG.images };
 }
 
 $("save").onclick = async () => {
@@ -435,8 +498,7 @@ $("save").onclick = async () => {
   try {
     const cfg = await api("/api/admin/config", { method: "PUT", body: JSON.stringify(formBody()) });
     const models = MODELS; CFG = cfg; MODELS = models;
-    renderBanners(); renderServers(); renderRoles(); renderPassword();
-    $("logout").classList.toggle("hidden", !CFG.has_password);
+    renderBanners(); renderServers(); renderRoles();
     dirty = false;
     $("saveMsg").innerHTML = CFG.missing.length ? `<span class="bad">Saved, but not ready yet: ${esc(CFG.missing.join("; "))}</span>` : `<span class="ok">Saved ✓</span> <a href="/">Go play →</a>`;
   } catch (e) { $("saveMsg").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }

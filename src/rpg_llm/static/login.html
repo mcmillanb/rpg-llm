@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RPG LLM · Log in</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
+<style>
+:root {
+  --bg: #f6f4ef; --panel: #ffffff; --ink: #1d1b18; --muted: #6d675e; --line: #e2ddd3;
+  --accent: #9a4a12; --accent-ink: #fff; --warn: #a33; --wash: rgba(246,244,239,.28);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e4dc; --muted: #9a958c; --line: #2d3136;
+    --accent: #e0914d; --accent-ink: #1a1208; --warn: #f07a7a; --wash: rgba(21,23,26,.86);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --panel: #1d2024; --ink: #e8e4dc; --muted: #9a958c; --line: #2d3136;
+  --accent: #e0914d; --accent-ink: #1a1208; --warn: #f07a7a; --wash: rgba(21,23,26,.86);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; color: var(--ink); background: var(--bg);
+  font: 16px/1.55 Georgia, "Iowan Old Style", "Palatino Linotype", serif; }
+body { background: linear-gradient(var(--wash), var(--wash)),
+  url("/static/backdrops/home.webp") center / cover fixed, var(--bg);
+  display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
+form { width: min(360px, 100%); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 22px 22px 18px; box-shadow: 0 10px 34px rgba(0,0,0,.18);
+  font: 14px/1.45 system-ui, sans-serif; }
+h1 { font: 600 20px Georgia, serif; margin: 0 0 4px; }
+p { margin: 0 0 14px; color: var(--muted); }
+label { display: block; margin: 12px 0 4px; }
+input { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink); font: inherit; }
+button { margin-top: 16px; width: 100%; padding: 9px 12px; border: 1px solid var(--accent);
+  border-radius: 8px; background: var(--accent); color: var(--accent-ink); font: inherit;
+  font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .6; cursor: default; }
+#msg { min-height: 20px; margin-top: 10px; color: var(--warn); }
+</style>
+</head>
+<body>
+<form id="form" autocomplete="on">
+  <h1>🎲 RPG LLM</h1>
+  <p>Log in to play.</p>
+  <label for="u">Username</label>
+  <input id="u" name="username" autocomplete="username" autocapitalize="none" required>
+  <label for="p">Password</label>
+  <input id="p" name="password" type="password" autocomplete="current-password" required>
+  <button id="go" type="submit">Log in</button>
+  <div id="msg" role="alert"></div>
+</form>
+<script>
+(function () { let t = null; try { t = localStorage.getItem("theme"); } catch {} if (t) document.documentElement.dataset.theme = t; })();
+const $ = (id) => document.getElementById(id);
+// only go back to a page on this site
+function next() {
+  const n = new URLSearchParams(location.search).get("next") || "/";
+  return n.startsWith("/") && !n.startsWith("//") ? n : "/";
+}
+fetch("/api/session").then(r => r.json()).then(s => { if (s.user || !s.accounts) location.replace(next()); }).catch(() => {});
+$("u").focus();
+$("form").onsubmit = async (e) => {
+  e.preventDefault();
+  $("go").disabled = true; $("msg").textContent = "";
+  try {
+    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("u").value.trim(), password: $("p").value }) });
+    if (r.ok) return location.replace(next());
+    let detail = r.statusText; try { detail = (await r.json()).detail; } catch {}
+    $("msg").textContent = detail; $("p").select();
+  } catch (err) { $("msg").textContent = "Can't reach the server."; }
+  $("go").disabled = false;
+};
+</script>
+</body>
+</html>
