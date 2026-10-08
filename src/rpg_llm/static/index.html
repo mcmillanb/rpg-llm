@@ -574,6 +574,11 @@ function openNewCampaign() {
     <div id="nSystemBlurb" class="muted small"></div>
     <input id="nSystem" class="hidden" placeholder="Any game or setting, e.g. Mothership, or your own world">
     <div class="muted small"><a id="nRefresh">↻ ask the GM again</a></div>
+    <div id="nModeWrap" class="hidden">
+      <label>How close to the rules?</label>
+      <select id="nMode"><option value="story">Story: a simple sheet, rules held lightly</option><option value="rules" id="nModeRules">Rules</option></select>
+      <div class="muted small" id="nModeNote"></div>
+    </div>
     <div class="two">
       <div><label>Writing style</label><select id="nStyle">
         <option value="plain" selected>Plain: practical, matter-of-fact</option>
@@ -585,6 +590,7 @@ function openNewCampaign() {
         <option value="medium" selected>Medium (~150–250 words)</option>
         <option value="long">Long (~250–400 words)</option></select></div>
     </div>
+    <div id="nPremiseWrap">
     <label>Premise <span class="muted">(optional): your character, where the story starts, or an idea to build on</span></label>
     <textarea id="nPremise" rows="7" placeholder="Leave blank to let the GM invent the opening, type your own idea, or use Suggest."></textarea>
     <div class="row-actions">
@@ -592,6 +598,7 @@ function openNewCampaign() {
       <button id="nAnother" disabled>↻ Try another</button>
       <span class="histnav"><button id="nPrev" title="Previous suggestion">◀</button><span id="nPos" class="muted small"></span><button id="nNext" title="Next suggestion">▶</button></span>
       <span id="nPremiseMsg" class="muted small"></span>
+    </div>
     </div>
     <div id="nPortraitWrap" class="hidden">
       <label>Portrait <span class="muted">(optional): your character's avatar in the chat</span></label>
@@ -623,11 +630,6 @@ function openNewCampaign() {
         <option value="none">No dice: pure narrative</option></select></div>
     </div>
     <label>Look</label><select id="nLook"><option value="auto">Match the game system</option></select>
-    <div id="nModeWrap" class="hidden">
-      <label>How close to the rules?</label>
-      <select id="nMode"><option value="story">Story: a simple sheet, rules held lightly</option><option value="rules" id="nModeRules">Rules</option></select>
-      <div class="muted small" id="nModeNote"></div>
-    </div>
     <label class="check"><input type="checkbox" id="nRewind"> Allow rewinds: let me edit my last move or re-roll the GM's reply after seeing it</label>
     <div class="muted small">Off keeps outcomes final, like a real table. You can always take a message back while the GM is still replying (Esc).</div>
     <div class="row-actions"><button class="primary" id="create">Create campaign</button><button id="nCancel">Cancel</button></div>
@@ -660,7 +662,8 @@ function openNewCampaign() {
   $("create").onclick = async () => {
     const name = $("nName").value.trim(); if (!name) return $("nName").focus();
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
-      name, system: chosenSystem(), premise: $("nPremise").value, dm_instructions: $("nExtra").value,
+      name, system: chosenSystem(), premise: PACK && $("nMode").value === "rules" ? "" : $("nPremise").value,
+      dm_instructions: $("nExtra").value,
       allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value,
       style: $("nStyle").value, length: $("nLength").value,
       theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
@@ -709,7 +712,8 @@ async function checkPack() {
 }
 function modeChanged() {
   const rules = PACK && $("nMode").value === "rules";
-  $("nModeNote").textContent = rules ? "The GM walks you through making your character, as at a real table: the choices from the real rules and your backstory, then an adventure built from it. The premise is optional: any ideas for your character or the world." : "";
+  $("nModeNote").textContent = rules ? "Your character, their story and where the adventure starts all come out of session 0: the GM walks you through making your character with the real rules, as at a table, then builds the opening from your backstory." : "";
+  $("nPremiseWrap").classList.toggle("hidden", !!rules);
   if (rules) $("nDice").value = "virtual";  // the player rolls their own dice, as at the table
   if (S.imagesEnabled) $("nPortraitWrap").classList.toggle("hidden", !!rules);  // painted after session 0
 }
