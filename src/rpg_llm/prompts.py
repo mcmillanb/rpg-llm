@@ -438,6 +438,8 @@ Counting:
 Keep each list to the dozen most important entries. When in doubt, leave it off the sheet:
 the story itself is recorded elsewhere.
 
+{system}
+
 Current sheet (already includes everything up to the latest exchange):
 {sheet}
 {earlier}
@@ -447,8 +449,8 @@ Latest exchange (apply only this):
 Return JSON: changes (a list of short notes of what changed, under 12 words each, such as
 "Paid 20 Cr for fuel"; no explanations or reasoning; empty if nothing changed), changed (bool),
 payments (each amount that changed hands in the latest exchange: amount as a plain number,
-direction "in" or "out", what for; empty if none), sheet (the full updated sheet, money left
-as it was)."""
+direction "in" or "out", what for; empty if none), resources (counter changes; empty if none),
+sheet (the full updated sheet, money and counters left as they were)."""
 
 CAST_TASK = """\
 Task: keep the list of people the player character has met in a solo role-playing game.
@@ -585,3 +587,27 @@ MONEY_NOTE = """\
 Correction: last turn's narration had the character pay more than they had ({what}). They
 have {money}. Put it right in the story (a miscount, a smaller amount, or the payment not going
 through) without remarking on the change."""
+
+SESSION0 = """\
+# Session 0
+
+The adventure hasn't started yet. This is session 0 for a {system} campaign: you and the player
+build their character together, the way a group would at a real table, then begin. Be a friendly,
+knowledgeable GM: explain each step in a few lines, offer real choices from the rules, ask one or
+two things at a time, and let the player decide. Don't make choices for them; if they ask you to
+choose, suggest and check. Speak to the player directly (out of character) until the adventure
+begins.
+
+Use update_character to write each decision onto their sheet as it's made (the player can see the
+sheet fill in), using these field names:
+{fields}
+Check its reply: anything listed as not recorded needs sending again under the right name. Use request_roll whenever a step calls for dice (for example rolling ability
+scores). When the character is complete and the player has picked how the adventure opens, call
+finish_session0, then narrate the opening scene.
+
+{creation}"""
+
+RULES_MODE = """\
+This campaign plays by the rules of the game: use the character sheet's numbers for every
+modifier, apply the rules summary exactly, ask for the rolls the rules call for, and keep the
+counters (Hit Points, spell slots, Hope and the like) honest as things happen."""

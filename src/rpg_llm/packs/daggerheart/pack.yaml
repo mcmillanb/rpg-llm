@@ -1,0 +1,37 @@
+id: daggerheart
+name: Daggerheart
+genre: Fantasy
+blurb: "Heroic, collaborative fantasy from Darrington Press: Duality Dice, Hope and Fear."
+matches: ["daggerheart"]
+theme: fantasy
+currency: handfuls of gold
+start_money: 1 handful of gold
+# session 0 can't finish while any of these is empty
+required: [ancestry, community, class, traits, evasion, armor, thresholds, weapons, experiences, domain_cards]
+check: 2D12
+duality: true
+# the GM model doesn't know Daggerheart: it gets the rules summary in both modes
+primer_in_story: true
+hide_core: [skills]
+sheet:
+  - {key: ancestry, label: Ancestry, type: text}
+  - {key: community, label: Community, type: text}
+  - {key: class, label: "Class and subclass", type: text}
+  - {key: level, label: Level, type: number, default: 1}
+  - {key: traits, label: Traits, type: scores, names: [Agility, Strength, Finesse, Instinct, Presence, Knowledge], mods: plain}
+  - {key: evasion, label: Evasion, type: number}
+  - {key: armor, label: "Armor (name, Armor Score)", type: text}
+  - {key: thresholds, label: "Damage thresholds (Major / Severe)", type: text}
+  - {key: proficiency, label: Proficiency, type: number, default: 1}
+  - {key: experiences, label: "Experiences (+2 each)", type: list}
+  - {key: weapons, label: "Weapons (trait, range, damage)", type: list}
+  - {key: domain_cards, label: Domain cards, type: list}
+  - {key: features, label: "Class, subclass and ancestry features", type: list}
+resources:
+  - {name: Hit Points, max: 6, current: 6}
+  - {name: Stress, max: 6, current: 0, marks: true}
+  - {name: Hope, max: 6, current: 2}
+  - {name: Armor Slots, max: 3, current: 0, marks: true}
+  - {name: GM Fear, max: 12, current: 1}
+# names written onto the sheet must exist in the rules reference (field: reference category)
+checks: {ancestry: ancestries, community: communities, domain_cards: abilities, weapons: weapons, armor: armor}

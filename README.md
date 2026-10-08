@@ -25,6 +25,16 @@ Each campaign also has:
   are real random rolls the GM asks for through a tool; it narrates from the result and can't
   invent one. **Rewinds** (editing your last move or re-rolling the GM's reply after seeing it)
   are off by default; you can always take a message back while the GM is still replying (Esc).
+- **Rules mode with a system pack (Daggerheart for now):** choose "Rules" when creating a
+  Daggerheart campaign and you get the real character sheet (traits, Evasion, thresholds, Hit
+  Points, Stress, Hope and Armor Slots as counters, Experiences, domain cards), a session 0
+  where the GM walks you through character creation from the official steps and options, and a
+  rules summary plus the official rules text for the GM to look up (`rules_lookup`) instead of
+  guessing. Daggerheart's Duality Dice show the Hope and Fear dice and roll "with Hope", "with
+  Fear" or critical. Packs live in `src/rpg_llm/packs/`; the rules text is built from the free
+  System Reference Documents by `scripts/build_srd.py` (Daggerheart SRD 2.0 under the Darrington
+  Press Community Gaming License; see each pack's REFERENCE-LICENSE.md). A D&D 5e (2024) pack
+  is drafted but switched off for now.
 - **A character sheet** (money, loans, gear, injuries, skills, assets, companions, debts). New
   campaigns start with one written from the premise; the router updates it after every reply;
   you can edit it. The GM sees it every turn and keeps to it. The router reports each payment

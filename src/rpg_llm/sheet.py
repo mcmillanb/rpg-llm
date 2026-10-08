@@ -13,7 +13,7 @@ import time
 
 import yaml
 
-from rpg_llm import prompts
+from rpg_llm import packs, prompts
 from rpg_llm.llm import LLMClient
 from rpg_llm.vault import Campaign
 
@@ -54,11 +54,95 @@ UPDATE_SCHEMA = {
 }
 
 
-def blank() -> dict:
-    return {k: ([] if k in LISTS else "") for k in FIELDS}
+RESOURCE_CHANGE = {
+    "type": "object",
+    "properties": {"name": {"type": "string"}, "change": {"type": "integer"},
+                   "set": {"type": ["integer", "null"]}, "max": {"type": ["integer", "null"]}},
+    "required": ["name", "change", "set", "max"],
+    "additionalProperties": False,
+}
 
 
-def clean(data: dict) -> dict:
+def blank(pack: dict | None = None) -> dict:
+    out = {k: ([] if k in LISTS else "") for k in FIELDS}
+    if pack:  # a Rules-mode sheet: the system's own fields and counters, at their defaults
+        out["money"] = pack.get("start_money") or f"0 {pack.get('currency', '')}".strip()
+        out["system"] = clean_system({f["key"]: f["default"] for f in pack.get("sheet") or []
+                                      if "default" in f}, pack)
+        out["resources"] = clean_resources(pack.get("resources") or [])
+    return out
+
+
+def _int(v) -> int:
+    m = re.search(r"-?\d+", str(v if v is not None else ""))
+    return int(m.group()) if m else 0
+
+
+def clean_system(data: dict, pack: dict) -> dict:
+    """The system's own sheet fields (pack.yaml 'sheet'), each with the right type."""
+    out = {}
+    for f in pack.get("sheet") or []:
+        v = (data or {}).get(f["key"])
+        if f["type"] == "number":
+            out[f["key"]] = _int(v)
+        elif f["type"] == "list":
+            items = v if isinstance(v, list) else ([v] if v else [])
+            out[f["key"]] = [str(i).strip() for i in items if str(i).strip()][:20]
+        elif f["type"] == "scores":
+            got = v if isinstance(v, dict) else {}
+            low = {str(k).lower()[:3]: val for k, val in got.items()}
+            out[f["key"]] = {n: _int(got.get(n, low.get(n.lower()[:3]))) for n in f["names"]}
+        else:
+            out[f["key"]] = str(v or "").strip()[:300]
+    return out
+
+
+def clean_resources(items: list) -> list[dict]:
+    """Counters: [{name, current, max}] (max 0 = no maximum); 'marks' counters (Stress) count up."""
+    out = []
+    for r in items or []:
+        if not isinstance(r, dict) or not str(r.get("name") or "").strip():
+            continue
+        mx = max(0, _int(r.get("max")))
+        cur = _int(r.get("current", mx if not r.get("marks") else 0))
+        cur = max(0, min(cur, mx)) if mx else max(0, cur)
+        item = {"name": str(r["name"]).strip()[:40], "current": cur, "max": mx}
+        if r.get("marks"):
+            item["marks"] = True
+        out.append(item)
+    return out[:16]
+
+
+def apply_resources(resources: list[dict], changes: list[dict]) -> list[dict]:
+    """Counters after the reported changes, worked out here: 'Hit Points -8' takes 8 off,
+    clamped between 0 and the maximum. A change to a counter not on the sheet adds it."""
+    out = [dict(r) for r in resources or []]
+    for ch in changes or []:
+        name = str(ch.get("name") or "").strip()
+        if not name:
+            continue
+        r = next((x for x in out if x["name"].lower() == name.lower()), None) or \
+            next((x for x in out if x["name"].lower().startswith(name.lower()[:5])), None)
+        if r is None:
+            if ch.get("set") is None and ch.get("max") is None:
+                continue
+            r = {"name": name[:40], "current": 0, "max": 0}
+            out.append(r)
+        if ch.get("max") is not None:
+            r["max"] = max(0, int(ch["max"]))
+        if ch.get("set") is not None:
+            r["current"] = int(ch["set"])
+        r["current"] += int(ch.get("change") or 0)
+        r["current"] = max(0, min(r["current"], r["max"])) if r["max"] else max(0, r["current"])
+    return out
+
+
+def resources_text(resources: list[dict]) -> str:
+    return "; ".join(f"{r['name']} {'marked ' if r.get('marks') else ''}{r['current']}"
+                     + (f"/{r['max']}" if r["max"] else "") for r in resources or [])
+
+
+def clean(data: dict, pack: dict | None = None) -> dict:
     """Keep only known fields, in order, with the right types; drop empty list entries."""
     out = blank()
     for k in FIELDS:
@@ -68,7 +152,49 @@ def clean(data: dict) -> dict:
             out[k] = [str(i).strip() for i in items if str(i).strip()]
         else:
             out[k] = str(v or "").strip()
+    if pack or data.get("system"):
+        out["system"] = clean_system(data.get("system") or {}, pack) if pack else data["system"]
+    if data.get("resources") or pack:
+        out["resources"] = clean_resources(data.get("resources") or [])
     return out
+
+
+def update_schema(pack: dict | None) -> dict:
+    """The update's JSON shape: counters always as changes; the system's fields when in Rules mode."""
+    sheet_schema = SHEET_SCHEMA
+    if pack:
+        props = {}
+        for f in pack.get("sheet") or []:
+            props[f["key"]] = ({"type": "integer"} if f["type"] == "number" else
+                               {"type": "array", "items": {"type": "string"}} if f["type"] == "list" else
+                               {"type": "object", "properties": {n: {"type": "integer"} for n in f["names"]},
+                                "required": f["names"], "additionalProperties": False}
+                               if f["type"] == "scores" else {"type": "string"})
+        sheet_schema = {**SHEET_SCHEMA,
+                        "properties": {**SHEET_SCHEMA["properties"],
+                                       "system": {"type": "object", "properties": props,
+                                                  "required": list(props), "additionalProperties": False}},
+                        "required": [*SHEET_SCHEMA["required"], "system"]}
+    return {**UPDATE_SCHEMA,
+            "properties": {**UPDATE_SCHEMA["properties"], "sheet": sheet_schema,
+                           "resources": {"type": "array", "items": RESOURCE_CHANGE}},
+            "required": [*UPDATE_SCHEMA["required"], "resources"]}
+
+
+def system_text(pack: dict | None, current: dict | None) -> str:
+    """For the update prompt: the system's fields and the counters."""
+    out = []
+    if pack:
+        out.append(f"This is a {pack['name']} character. The sheet's \"system\" holds its own "
+                   "fields; keep them to what the story establishes:")
+        out += [f"- {f['key']}: {f['label']}" for f in pack.get("sheet") or []]
+    res = (current or {}).get("resources") or []
+    out.append("Counters (" + (resources_text(res) or "none yet") + ") are changed only through "
+               "\"resources\": [{name, change, set, max}]: change is +/- (damage taken: Hit Points "
+               "-8; 1 Hope spent: Hope -1; Stress marked: Stress +1), set/max only to set a value "
+               "outright (null otherwise). Don't do the arithmetic, and leave the sheet's own "
+               "counter list as it is.")
+    return "\n".join(out)
 
 
 MAX_ITEMS = 12
@@ -131,11 +257,15 @@ def guard(old: dict | None, new: dict) -> dict:
 
 def load(campaign: Campaign) -> dict | None:
     text = campaign.read(FILE)
-    return clean(yaml.safe_load(text) or {}) if text.strip() else None
+    if not text.strip():
+        return None
+    pack = packs.for_campaign(campaign.meta) if packs.rules_mode(campaign.meta) else None
+    return clean(yaml.safe_load(text) or {}, pack)
 
 
 def save(campaign: Campaign, sheet: dict, after: int, what: str) -> dict:
-    sheet = clean(sheet)
+    pack = packs.for_campaign(campaign.meta) if packs.rules_mode(campaign.meta) else None
+    sheet = clean(sheet, pack)
     campaign.write(FILE, yaml.safe_dump(sheet, sort_keys=False, allow_unicode=True, width=100))
     with campaign.path(HISTORY).open("a") as f:
         f.write(json.dumps({"after": after, "ts": time.time(), "what": what, "sheet": sheet},
@@ -150,7 +280,7 @@ def history(campaign: Campaign) -> list[dict]:
     return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
 
 
-def notes_block(sheet: dict | None) -> str:
+def notes_block(sheet: dict | None, pack: dict | None = None) -> str:
     if not sheet:
         return ""
     lines = [f"## Character sheet (current; keep to it)"]
@@ -160,6 +290,16 @@ def notes_block(sheet: dict | None) -> str:
             continue
         label = k.replace("_", " ").capitalize()
         lines.append(f"{label}: {'; '.join(v) if isinstance(v, list) else v}")
+    labels = {f["key"]: f["label"] for f in (pack or {}).get("sheet") or []}
+    for k, v in (sheet.get("system") or {}).items():
+        if v in ("", 0, [], None) or (isinstance(v, dict) and not any(v.values())):
+            continue
+        shown = ("; ".join(v) if isinstance(v, list) else
+                 ", ".join(f"{n} {x:+d}" if (pack and any(f.get("mods") == "plain" for f in pack["sheet"] if f["key"] == k)) else f"{n} {x}"
+                           for n, x in v.items()) if isinstance(v, dict) else v)
+        lines.append(f"{labels.get(k, k)}: {shown}")
+    if sheet.get("resources"):
+        lines.append(f"Counters: {resources_text(sheet['resources'])}")
     return "\n".join(lines)
 
 
@@ -208,6 +348,8 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     if len(messages) < 2 or messages[-1]["role"] != "assistant":
         return None
     current = load(campaign)
+    pack = packs.for_campaign(campaign.meta) if packs.rules_mode(campaign.meta) else None
+    schema = update_schema(pack)
     fmt = lambda ms: "\n\n".join(f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {m['content'][:3000]}"
                                   for m in ms)
     exchange = fmt(messages[-2:])
@@ -218,28 +360,32 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     task = prompts.SHEET_TASK.format(
         sheet=yaml.safe_dump(current, sort_keys=False, allow_unicode=True) if current
         else "(no sheet yet: create it from the brief and this exchange)",
-        exchange=exchange, earlier=earlier)
+        exchange=exchange, earlier=earlier, system=system_text(pack, current))
     system = SYSTEM if current else f"{SYSTEM}\n\nCampaign brief:\n{campaign.brief.strip()}"
     ask = [{"role": "system", "content": system}, {"role": "user", "content": task}]
     rechecked = None
     money_talk = bool(MONEY_WORDS.search(exchange))
 
     def read(res: dict) -> dict:
-        sh = clean(res.get("sheet") or {})
+        sh = clean(res.get("sheet") or {}, pack)
+        if current:  # counters: changes applied here, never the model's own list
+            changed = apply_resources(current.get("resources") or [], res.get("resources") or [])
+            if changed or "resources" in current:
+                sh["resources"] = changed
         if current:  # money = the old amount plus the reported payments, added up here
             computed = apply_payments(current["money"], res.get("payments") or [] if money_talk else [])
             if computed is not None:
                 sh["money"] = computed
         return guard(current, sh)
 
-    result = await router.json(ask, UPDATE_SCHEMA, max_tokens=1500)
+    result = await router.json(ask, schema, max_tokens=1800)
     new = read(result)
     if new.get("_refused"):  # below zero: one more look before giving up on the change
         again = await router.json(ask + [
             {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)},
             {"role": "user", "content": prompts.SHEET_RECHECK.format(
                 new=new["_refused"], old=current["money"],
-                history=fmt(messages[-12:-4]) or "(none)")}], UPDATE_SCHEMA, max_tokens=1500)
+                history=fmt(messages[-12:-4]) or "(none)")}], schema, max_tokens=1800)
         second = read(again)
         if not second.get("_refused"):
             # accepted, but say so: the first reading was impossible, the second may be a guess

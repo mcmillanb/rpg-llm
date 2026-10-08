@@ -10,7 +10,7 @@ TOOL = {"type": "function", "function": {
                    "result; narrate from it. Examples: dice='2D6+1', target=8 (need 8 or more); "
                    "dice='d100', target=45, success_if='at_most' (roll under a skill).",
     "parameters": {"type": "object", "properties": {
-        "dice": {"type": "string", "description": "e.g. 2D6, 2D6+1, d20-2, 3d6, d100"},
+        "dice": {"type": "string", "description": "e.g. 2D6, 2D6+1, d20-2, 2D20KH1+5 (advantage), 4D6KH3, d100"},
         "reason": {"type": "string", "description": "what the roll is for, a few words"},
         "target": {"type": "integer", "description": "number to compare against (optional)"},
         "success_if": {"type": "string", "enum": ["at_least", "at_most"],
@@ -24,7 +24,7 @@ REQUEST_TOOL = {"type": "function", "function": {
                    "dice; the prompt is a few words. Call it as a tool: never write its "
                    "arguments into the story.",
     "parameters": {"type": "object", "properties": {
-        "dice": {"type": "string", "description": "e.g. 2D6, 2D6+1, d20+3, d100"},
+        "dice": {"type": "string", "description": "e.g. 2D6+1, d20+3, 2D20KH1+3 (advantage), 2D20KL1+3 (disadvantage), 2D12+2 (Daggerheart), d100"},
         "prompt": {"type": "string", "description": "a few words, e.g. 'Roll to attack the goblin'"},
         "target": {"type": "integer", "description": "number to compare against (optional)"},
         "success_if": {"type": "string", "enum": ["at_least", "at_most"],
@@ -32,19 +32,53 @@ REQUEST_TOOL = {"type": "function", "function": {
                                       "succeeds; at_most only for roll-under systems"},
     }, "required": ["dice", "prompt"]}}}
 
-_DICE = re.compile(r"^\s*(\d*)\s*[dD]\s*(\d+|%)\s*(?:([+-])\s*(\d+))?\s*$")
+# Dice notation: terms added or subtracted, e.g. "2D6+1", "d20+5", "2D20KH1+5" (advantage: roll
+# two, keep the higher), "2D20KL1" (disadvantage), "4D6KH3" (ability scores), "2D12+1D6+2"
+# (Daggerheart with advantage), "d100".
+_TERM = re.compile(r"\s*([+-]?)\s*(?:(\d*)\s*[dD]\s*(\d+|%)(?:\s*[kK]\s*([hHlL])\s*(\d+))?|(\d+))\s*")
+
+
+def terms(dice: str) -> tuple[list[dict], int]:
+    """'2D20KH1+5' -> ([{count: 2, sides: 20, keep: ('h', 1), sign: 1}], 5). Raises ValueError."""
+    text = (dice or "").strip()
+    pos, out, mod, n_dice = 0, [], 0, 0
+    while pos < len(text):
+        m = _TERM.match(text, pos)
+        if not m or m.end() == pos or (pos and not m.group(1)):
+            raise ValueError(f"can't read dice {dice!r}; use a form like 2D6+1 or 2D20KH1+5")
+        sign = -1 if m.group(1) == "-" else 1
+        if m.group(6) is not None:
+            mod += sign * int(m.group(6))
+        else:
+            count = int(m.group(2) or 1)
+            sides = 100 if m.group(3) == "%" else int(m.group(3))
+            keep = (m.group(4).lower(), int(m.group(5))) if m.group(4) else None
+            if not (1 <= count <= 20 and 2 <= sides <= 1000) or (keep and not 1 <= keep[1] <= count):
+                raise ValueError("between 1 and 20 dice of 2 to 1000 sides, keeping no more than rolled")
+            n_dice += count
+            out.append({"count": count, "sides": sides, "keep": keep, "sign": sign})
+        pos = m.end()
+    if not out or n_dice > 24:
+        raise ValueError(f"can't read dice {dice!r}; use a form like 2D6+1")
+    return out, mod
+
+
+def canon(dice: str) -> str:
+    """The notation written the standard way: 'd20 + 5' -> '1D20+5'."""
+    ts, mod = terms(dice)
+    text = ""
+    for t in ts:
+        keep = f"K{t['keep'][0].upper()}{t['keep'][1]}" if t["keep"] else ""
+        text += f"{'-' if t['sign'] < 0 else '+' if text else ''}{t['count']}D{t['sides']}{keep}"
+    return text + (f"{mod:+d}" if mod else "")
 
 
 def parse(dice: str) -> tuple[int, int, int]:
-    """'2D6+1' -> (count, sides, modifier). Raises ValueError for anything else."""
-    m = _DICE.match(dice or "")
-    if not m:
-        raise ValueError(f"can't read dice {dice!r}; use a form like 2D6+1")
-    count = int(m.group(1) or 1)
-    sides = 100 if m.group(2) == "%" else int(m.group(2))
-    if not (1 <= count <= 20 and 2 <= sides <= 1000):
-        raise ValueError("between 1 and 20 dice of 2 to 1000 sides")
-    return count, sides, int(m.group(4) or 0) * (-1 if m.group(3) == "-" else 1)
+    """Single-term dice only: '2D6+1' -> (count, sides, modifier)."""
+    ts, mod = terms(dice)
+    if len(ts) != 1 or ts[0]["keep"] or ts[0]["sign"] < 0:
+        raise ValueError("not a single plain dice term")
+    return ts[0]["count"], ts[0]["sides"], mod
 
 
 def notation(count: int, sides: int, mod: int) -> str:
@@ -54,8 +88,7 @@ def notation(count: int, sides: int, mod: int) -> str:
 def request(args: dict, roll_under_ok: bool = True) -> dict:
     """A validated roll request from the GM's request_roll call (nothing rolled yet).
     roll_under_ok=False forces roll-high, for systems where "at most" is always a mistake."""
-    count, sides, mod = parse(str(args.get("dice", "")))
-    req = {"id": secrets.token_hex(6), "dice": notation(count, sides, mod),
+    req = {"id": secrets.token_hex(6), "dice": canon(str(args.get("dice", ""))),
            "prompt": str(args.get("prompt") or "Roll").strip()[:120]}
     if isinstance(args.get("target"), int):
         req["target"] = args["target"]
@@ -65,39 +98,82 @@ def request(args: dict, roll_under_ok: bool = True) -> dict:
 
 
 def roll(dice: str, reason: str = "", target: int | None = None,
-         success_if: str = "at_least") -> dict:
-    count, sides, mod = parse(dice)
-    rolls = [secrets.randbelow(sides) + 1 for _ in range(count)]
-    total = sum(rolls) + mod
-    out = {"dice": notation(count, sides, mod), "reason": reason.strip(),
-           "rolls": rolls, "modifier": mod, "total": total}
+         success_if: str = "at_least", duality: bool = False) -> dict:
+    """Roll it. `duality`: Daggerheart, where a roll starting 2D12 is the Hope die and the Fear
+    die: which is higher decides "with Hope" or "with Fear", and matching dice are a critical."""
+    ts, mod = terms(dice)
+    rolls, kept, parts, total = [], [], [], mod
+    for t in ts:
+        r = [secrets.randbelow(t["sides"]) + 1 for _ in range(t["count"])]
+        keep = [True] * len(r)
+        if t["keep"]:
+            order = sorted(range(len(r)), key=lambda i: r[i], reverse=t["keep"][0] == "h")
+            keep = [i in order[:t["keep"][1]] for i in range(len(r))]
+        total += t["sign"] * sum(v for v, k in zip(r, keep) if k)
+        rolls += r
+        kept += keep
+        parts.append({"sides": t["sides"], "rolls": r, "kept": keep, "sign": t["sign"]})
+    out = {"dice": canon(dice), "reason": reason.strip(), "rolls": rolls, "modifier": mod,
+           "total": total, "sides": [p["sides"] for p in parts for _ in p["rolls"]]}
+    if not all(kept):
+        out["kept"] = kept
+    if any(p["sign"] < 0 for p in parts):
+        out["signs"] = [p["sign"] for p in parts for _ in p["rolls"]]
+    if duality and ts[0]["count"] == 2 and ts[0]["sides"] == 12 and not ts[0]["keep"] and ts[0]["sign"] > 0:
+        hope, fear = parts[0]["rolls"]
+        out["duality"] = {"hope": hope, "fear": fear,
+                          "outcome": "critical" if hope == fear else "with Hope" if hope > fear else "with Fear"}
     if target is not None:
         ok = total <= target if success_if == "at_most" else total >= target
+        if out.get("duality", {}).get("outcome") == "critical":
+            ok = True  # matching Duality Dice always succeed
         out.update(target=target, success_if=success_if, success=ok)
     return out
 
 
+def _dice_text(r: dict) -> str:
+    """'17 + [6]' (a dropped die in brackets), or 'Hope 7, Fear 11' for Duality Dice."""
+    kept = r.get("kept") or [True] * len(r["rolls"])
+    signs = r.get("signs") or [1] * len(r["rolls"])
+    items = [(f"{v}" if k else f"[{v}]", sg) for v, k, sg in zip(r["rolls"], kept, signs)]
+    if r.get("duality"):
+        head, items = f"Hope {r['duality']['hope']}, Fear {r['duality']['fear']}", items[2:]
+    else:
+        (first, sg), items = items[0], items[1:]
+        head = first if sg > 0 else f"-{first}"
+    return head + "".join(f" {'+' if sg > 0 else '-'} {x}" for x, sg in items)
+
+
+def _duality_note(r: dict) -> str:
+    d = r.get("duality")
+    if not d:
+        return ""
+    return {"critical": " Critical (matching dice): a success whatever the total; the player gains 1 Hope and clears 1 Stress.",
+            "with Hope": " With Hope: the player gains 1 Hope.",
+            "with Fear": " With Fear: the GM gains 1 Fear, and on a failure the GM makes a move."}[d["outcome"]]
+
+
 def describe(r: dict) -> str:
     """What the GM reads back."""
-    parts = " + ".join(map(str, r["rolls"]))
     mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
-    text = f"{r['dice']} for {r['reason'] or 'the action'}: rolled {parts}{mod} = {r['total']}."
+    text = f"{r['dice']} for {r['reason'] or 'the action'}: rolled {_dice_text(r)}{mod} = {r['total']}."
     if "target" in r:
         need = f"{r['target']} or {'less' if r['success_if'] == 'at_most' else 'more'}"
         text += f" Needed {need}: {'SUCCESS' if r['success'] else 'FAILURE'}"
         margin = abs(r["total"] - r["target"])
         text += f" (by {margin})." if margin else " (exactly)."
-    return text + " Narrate from this result."
+    return text + _duality_note(r) + " Narrate from this result."
 
 
 def player_line(r: dict) -> str:
     """The player's turn after an on-screen roll, as the GM reads it."""
-    parts = " + ".join(map(str, r["rolls"]))
     mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
-    text = f"🎲 {r['reason'] or 'Roll'}: {r['dice']} → {parts}{mod} = {r['total']}"
+    text = f"🎲 {r['reason'] or 'Roll'}: {r['dice']} → {_dice_text(r)}{mod} = {r['total']}"
     if "target" in r:
         text += (f" (needed {r['target']} or {'less' if r['success_if'] == 'at_most' else 'more'}: "
                  f"{'success' if r['success'] else 'failure'})")
+    if r.get("duality"):
+        text += f", {r['duality']['outcome']}." + _duality_note(r)
     return text
 
 
@@ -163,11 +239,11 @@ def request_from_text(text: str, key: str) -> dict | None:
         return None
     m = matches[-1]
     try:
-        count, sides, mod = parse(re.sub(r"\s+", "", m.group(1)))
+        dice_text = canon(re.sub(r"\s+", "", m.group(1)))
     except ValueError:
         return None
     req = {"id": "t" + hashlib.sha1(f"{key}:{m.group(0)}".encode()).hexdigest()[:11],
-           "dice": notation(count, sides, mod), "from_text": True}
+           "dice": dice_text, "from_text": True}
     goal = (m.group(3) or "").strip().rstrip(",;:")
     if len(goal) > 70:  # keep it short, cut at a word
         goal = goal[:70].rsplit(" ", 1)[0].rstrip(",;:") + "…"
@@ -197,6 +273,10 @@ def asked_roll(text: str) -> str | None:
 
 def standard_dice(system: str) -> dict:
     """The system's usual task roll, for when the GM didn't say which dice."""
+    from rpg_llm import packs
+    pack = packs.match(system)
+    if pack and pack.get("check"):
+        return {"dice": pack["check"]}
     s = (system or "").lower()
     if any(k in s for k in ("traveller", "cepheus", "2d6")):
         return {"dice": "2D6", "target": 8, "success_if": "at_least"}
@@ -218,3 +298,27 @@ def standard_request(ask: str, system: str, key: str) -> dict:
            "prompt": goal if goal.lower().startswith("roll") else f"Roll: {goal}",
            "from_text": True, "standard": True, **standard_dice(system)}
     return req
+
+
+# Qwen sometimes writes its tool call into the reply as text instead of making it:
+#   <tool_call> <function=rules_lookup> <parameter=query> Deft Deceiver </parameter> </function> </tool_call>
+_XML_CALL = re.compile(r"<tool_call>\s*<function=([\w.-]+)>(.*?)</function>\s*(?:</tool_call>)?", re.S)
+_XML_PARAM = re.compile(r"<parameter=([\w.-]+)>(.*?)</parameter>", re.S)
+
+
+def tool_calls_from_text(text: str) -> tuple[list[dict], str]:
+    """Tool calls written as text, as real calls, and the text without them."""
+    import json as _json
+    calls = []
+    for i, m in enumerate(_XML_CALL.finditer(text or "")):
+        args = {}
+        for p in _XML_PARAM.finditer(m.group(2)):
+            raw = p.group(2).strip()
+            try:
+                args[p.group(1)] = _json.loads(raw)
+            except ValueError:
+                args[p.group(1)] = raw
+        calls.append({"id": f"text_{i}", "name": m.group(1), "arguments": _json.dumps(args)})
+    cleaned = _XML_CALL.sub("", text or "")
+    cleaned = re.sub(r"</?tool_call>", "", cleaned).strip()
+    return calls, cleaned

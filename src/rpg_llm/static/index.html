@@ -234,6 +234,25 @@ label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 @media (prefers-reduced-motion: reduce) { .dicefly .die { animation: none; } }
 .rolled { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 14px/1.4 system-ui, sans-serif; }
 .rolled .die { width: 32px; height: 32px; }
+.die.dropped { opacity: .35; }
+.dual { display: inline-flex; flex-direction: column; align-items: center; line-height: 1; }
+.dual small { font: 600 10px system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; margin-top: 2px; }
+.dual.hope small { color: #b8860b; } .dual.fear small { color: #7b4fa8; }
+.dual.hope .die polygon { stroke: #c9a227; } .dual.fear .die polygon { stroke: #7b4fa8; }
+.outcome { font: 600 12px system-ui, sans-serif; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.outcome.hope { color: #9a7413; border-color: #c9a227; } .outcome.fear { color: #6b3f98; border-color: #7b4fa8; }
+.outcome.critical { color: #2f8a45; border-color: #2f8a45; }
+.scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
+.scores div { border: 1px solid var(--line); border-radius: 10px; padding: 6px; text-align: center; }
+.scores label { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.scores input { text-align: center; padding: 4px; font-weight: 600; }
+.scores .mod { font: 12px system-ui, sans-serif; color: var(--muted); }
+.counters { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.counter { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.counter .cname { flex: 1; }
+.counter .cval { font-weight: 600; min-width: 64px; text-align: center; }
+.counter button { padding: 0 10px; font-size: 16px; line-height: 26px; }
+.session0 { border-color: var(--accent); }
 .rolled .die text { font-size: 38px; }
 .rolled .res.ok { color: #2f8a45; font-weight: 600; } .rolled .res.fail { color: var(--warn); font-weight: 600; }
 .histnav { display: inline-flex; gap: 6px; align-items: center; }
@@ -604,6 +623,11 @@ function openNewCampaign() {
         <option value="none">No dice: pure narrative</option></select></div>
     </div>
     <label>Look</label><select id="nLook"><option value="auto">Match the game system</option></select>
+    <div id="nModeWrap" class="hidden">
+      <label>How close to the rules?</label>
+      <select id="nMode"><option value="story">Story: a simple sheet, rules held lightly</option><option value="rules" id="nModeRules">Rules</option></select>
+      <div class="muted small" id="nModeNote"></div>
+    </div>
     <label class="check"><input type="checkbox" id="nRewind"> Allow rewinds: let me edit my last move or re-roll the GM's reply after seeing it</label>
     <div class="muted small">Off keeps outcomes final, like a real table. You can always take a message back while the GM is still replying (Esc).</div>
     <div class="row-actions"><button class="primary" id="create">Create campaign</button><button id="nCancel">Cancel</button></div>
@@ -617,6 +641,8 @@ function openNewCampaign() {
   api("/api/themes").then(t => { $("nLook").innerHTML += Object.entries(t).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join(""); }).catch(() => {});
   $("nRefresh").onclick = () => loadSystems(true);
   $("nSystemPick").onchange = systemChanged;
+  $("nMode").onchange = modeChanged;
+  $("nSystem").addEventListener("change", checkPack);
   $("nSuggest").onclick = () => suggestPremise(true);
   if (S.imagesEnabled) {
     $("nPortraitWrap").classList.remove("hidden");
@@ -640,6 +666,7 @@ function openNewCampaign() {
       theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
       portrait: PORT.at >= 0 ? PORT.history[PORT.at].token : "",
       tone: SYSTEMS.find(x => x.name === chosenSystem())?.blurb || "",
+      mode: PACK ? $("nMode").value : "story",
       appearance: S.imagesEnabled ? $("nAppearance").value : "" }) });
     NEW = { seed: "", history: [], at: -1 };
     PORT = { history: [], at: -1 };
@@ -669,6 +696,22 @@ function systemChanged() {
   $("nSystem").classList.toggle("hidden", v !== OTHER);
   if (v === OTHER) $("nSystem").focus();
   $("nSystemBlurb").textContent = SYSTEMS.find(s => s.name === v)?.blurb || "";
+  checkPack();
+}
+// A system with a pack offers Rules mode: its real sheet and a session 0.
+let PACK = null;
+async function checkPack() {
+  const system = chosenSystem();
+  try { PACK = system ? (await api(`/api/packs/match?system=${encodeURIComponent(system)}`)).pack : null; } catch { PACK = null; }
+  $("nModeWrap").classList.toggle("hidden", !PACK);
+  if (PACK) $("nModeRules").textContent = `Rules: the real ${PACK.name} sheet, and a session 0 to build your character`;
+  modeChanged();
+}
+function modeChanged() {
+  const rules = PACK && $("nMode").value === "rules";
+  $("nModeNote").textContent = rules ? "The GM walks you through making your character, as at a real table: the choices from the real rules and your backstory, then an adventure built from it. The premise is optional: any ideas for your character or the world." : "";
+  if (rules) $("nDice").value = "virtual";  // the player rolls their own dice, as at the table
+  if (S.imagesEnabled) $("nPortraitWrap").classList.toggle("hidden", !!rules);  // painted after session 0
 }
 function chosenSystem() {
   const v = $("nSystemPick").value;
@@ -776,6 +819,7 @@ async function openCampaign(slug) {
   closePanel();
   PSIG = {};
   updatePanels(S.data.panels);
+  if (S.data.session0 && matchMedia("(min-width: 901px)").matches) openPanel("character");  // watch it fill in
   let again = null; try { again = localStorage.getItem("panel:" + slug); } catch {}
   if (again && document.body.dataset.pinned && matchMedia("(min-width: 1200px)").matches && PANELS[again]) openPanel(again);
   startPoll();
@@ -795,10 +839,14 @@ function lastTurnFailed() {
 }
 function canEditLast() { return S.data.can_rewind || lastTurnFailed(); }
 
+function rollsText(r) {
+  const kept = r.kept || r.rolls.map(() => true);
+  return r.rolls.map((v, i) => kept[i] ? `${v}` : `[${v}]`).join(" + ");
+}
 function rollHTML(r) {
   const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
   const res = "target" in r ? ` vs ${r.target}${r.success_if === "at_most" ? "−" : "+"} ${r.success ? "✓ success" : "✗ failure"}` : "";
-  return `<div class="roll ${"success" in r ? (r.success ? "ok" : "fail") : ""}">🎲 <strong>${esc(r.reason || "Roll")}</strong> · ${esc(r.dice)}: ${r.rolls.join(" + ")}${mod} = <strong>${r.total}</strong>${res}</div>`;
+  return `<div class="roll ${"success" in r ? (r.success ? "ok" : "fail") : ""}">🎲 <strong>${esc(r.reason || "Roll")}</strong> · ${esc(r.dice)}: ${rollsText(r)}${mod} = <strong>${r.total}</strong>${res} ${outcomeHTML(r)}</div>`;
 }
 function rollsHTML(rolls) { return rolls?.length ? `<div class="rolls">${rolls.map(rollHTML).join("")}</div>` : ""; }
 
@@ -816,28 +864,49 @@ function dieSVG(sides, value) {
   const label = value ?? (sides === 100 ? "%" : "?");
   return `<svg class="die" viewBox="0 0 100 100" data-sides="${sides}">${shape}<text x="50" y="${sides === 4 ? 62 : 52}">${label}</text></svg>`;
 }
-function parseDice(notation) {
-  const m = /^(\d*)D(\d+)([+-]\d+)?$/i.exec(notation || "");
-  return m ? { count: +(m[1] || 1), sides: +m[2], mod: +(m[3] || 0) } : { count: 1, sides: 20, mod: 0 };
+function parseDice(notation) {  // the first dice term and the flat modifier (for the tray)
+  const m = /^(\d*)D(\d+)/i.exec(notation || "");
+  const mod = /([+-]\d+)$/.exec(notation || "");
+  return m ? { count: +(m[1] || 1), sides: +m[2], mod: mod && !/D\d+$/i.test(notation) ? +mod[1] : 0 } : { count: 1, sides: 20, mod: 0 };
+}
+// every die in a notation, in order ("2D12+1D6+2" -> [12, 12, 6])
+function diceList(notation) {
+  const out = []; const re = /(\d*)D(\d+)/gi; let m;
+  while ((m = re.exec(notation || ""))) for (let i = 0; i < Math.min(+(m[1] || 1), 24); i++) out.push(+m[2]);
+  return out.length ? out : [20];
+}
+// Daggerheart: the first two d12s are the Hope die and the Fear die
+function isDuality(notation) { return !!S.data?.duality && /^2D12/i.test(notation || ""); }
+function facesHTML(sides, values, kept, duality) {
+  return sides.map((sd, i) => {
+    let die = dieSVG(sd, values ? values[i] : undefined);
+    if (kept && kept[i] === false) die = die.replace('class="die"', 'class="die dropped"');
+    if (duality && i < 2) return `<span class="dual ${i ? "fear" : "hope"}">${die}<small>${i ? "Fear" : "Hope"}</small></span>`;
+    return die;
+  }).join("");
+}
+function outcomeHTML(r) {
+  if (!r.duality) return "";
+  const o = r.duality.outcome;
+  return `<span class="outcome ${o === "critical" ? "critical" : o === "with Hope" ? "hope" : "fear"}">${o === "critical" ? "critical!" : o}</span>`;
 }
 function needText(r) {
   return "target" in r ? `need ${r.target}${r.success_if === "at_most" ? " or less" : "+"}` : "";
 }
 function rollRequestHTML(req, live) {
-  const d = parseDice(req.dice);
-  const shown = Math.min(d.count, 6);
+  const all = diceList(req.dice), shown = all.slice(0, 8);
   return `<div class="rollreq ${live ? "live" : ""}" data-roll="${esc(req.id)}">
     <div class="rq-title">🎲 ${esc(req.prompt)}</div>
     <div class="muted">${esc(req.dice)}${needText(req) ? " · " + needText(req) : ""}${live ? "" : " · rolled"}</div>
-    <div class="rq-dice">${Array.from({ length: shown }, () => dieSVG(d.sides)).join("")}${d.count > shown ? `<span class="muted">+${d.count - shown} more</span>` : ""}
+    <div class="rq-dice">${facesHTML(shown, null, null, isDuality(req.dice))}${all.length > shown.length ? `<span class="muted">+${all.length - shown.length} more</span>` : ""}
       ${live ? `<button class="primary" data-act="roll">🎲 Roll</button>` : ""}</div>
   </div>`;
 }
 function rolledHTML(r) {
-  const d = parseDice(r.dice);
+  const sides = r.sides || diceList(r.dice);
   const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
   const res = "success" in r ? `<span class="res ${r.success ? "ok" : "fail"}">${r.success ? "✓ success" : "✗ failure"}</span>` : "";
-  return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${r.rolls.map(v => dieSVG(d.sides, v)).join("")}${mod} = <strong>${r.total}</strong> ${needText(r) ? `<span class="muted">(${needText(r)})</span>` : ""} ${res}</div>`;
+  return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${facesHTML(sides.slice(0, r.rolls.length), r.rolls, r.kept, !!r.duality)}${mod} = <strong>${r.total}</strong> ${needText(r) ? `<span class="muted">(${needText(r)})</span>` : ""} ${res} ${outcomeHTML(r)}</div>`;
 }
 
 // ---- a portrait at full size -----------------------------------------------------------------
@@ -954,7 +1023,11 @@ function renderChat(scroll) {
   const lastUser = [...msgs].reverse().find(m => m.role === "user");
   const last = msgs[msgs.length - 1];
   let html = start > 0 ? `<button id="more" class="ui">Show earlier (${start})</button>` : "";
-  if (!msgs.length) html += `<div class="card ui muted">${md(S.data.meta.premise || "")}<p>Describe your first move to begin.</p></div>`;
+  if (!msgs.length && S.data.session0) html += `<div class="card ui session0"><strong>Session 0</strong>
+    <p class="muted">Before the adventure, the GM helps you build your character the way you would at a real table: the choices, the rolls and your backstory. Your sheet fills in as you go (Character panel).</p>
+    ${S.data.meta.premise ? `<div class="muted small">Your ideas: ${esc(S.data.meta.premise)}</div>` : ""}
+    <p><button class="primary" id="startS0">Let's begin</button></p></div>`;
+  else if (!msgs.length) html += `<div class="card ui muted">${md(S.data.meta.premise || "")}<p>Describe your first move to begin.</p></div>`;
   let curScene = null, open = false;
   for (const m of msgs.slice(start)) {
     const sc = sceneFor(m.id);
@@ -971,6 +1044,7 @@ function renderChat(scroll) {
   $("view").innerHTML = html;
   updateBackdrop();
   $("more")?.addEventListener("click", () => { S.shown += 150; renderChat(false); });
+  $("startS0")?.addEventListener("click", () => runTurn(`/api/campaigns/${S.slug}/chat`, { content: "Let's start session 0: help me make my character." }, "Let's start session 0: help me make my character."));
   $("view").querySelectorAll("[data-act=regen]").forEach(b => b.onclick = regenerate);
   $("view").querySelectorAll(".avatar").forEach(a => a.onclick = () => openPanel("character"));
   $("view").querySelectorAll("[data-person]").forEach(a => a.onclick = () => showPortrait(a.dataset.person));
@@ -1041,6 +1115,7 @@ async function runTurn(path, body, optimisticUser, kind = "chat", extra = {}) {
         if (stick) $("main").scrollTop = $("main").scrollHeight;
       },
       tool: (e) => { $("statusline").textContent = `GM is checking the archive: ${e.name} ${e.arguments}`; },
+      sheet: () => { if (PANEL === "character") renderSheet("character"); },
       roll: (e) => { const rb = box.querySelector(".rolls"); rb.classList.remove("hidden"); rb.insertAdjacentHTML("beforeend", rollHTML(e)); },
       error: (e) => { throw new Error(e.text); },
       done: () => {},
@@ -1079,14 +1154,14 @@ function send() {
 }
 // ---- the player rolls the GM's requested dice ------------------------------------------
 // The tumble across the screen: land(r) settles the dice on the result, cancel() clears them.
-function diceFly(d) {
-  const shown = Math.min(d.count, 6);
+function diceFly(sidesList, duality = false) {  // sidesList: [12, 12, 6]
+  const shown = sidesList.slice(0, 8);
   const fly = document.createElement("div");
   fly.className = "dicefly";
-  fly.innerHTML = `<div class="row">${Array.from({ length: shown }, (_, i) => dieSVG(d.sides).replace('class="die"', `class="die" style="animation-delay:${i * 90}ms"`)).join("")}</div><div class="banner"></div>`;
+  fly.innerHTML = `<div class="row">${facesHTML(shown, null, null, duality).replace(/class="die"/g, () => `class="die" style="animation-delay:${Math.random() * 200 | 0}ms"`)}</div><div class="banner"></div>`;
   document.body.appendChild(fly);
   const faces = [...fly.querySelectorAll(".die text")];
-  const flicker = setInterval(() => faces.forEach(t => t.textContent = 1 + Math.floor(Math.random() * d.sides)), 70);
+  const flicker = setInterval(() => faces.forEach((t, i) => t.textContent = 1 + Math.floor(Math.random() * shown[i])), 70);
   const t0 = Date.now();
   let settled = false;
   return {
@@ -1095,10 +1170,12 @@ function diceFly(d) {
       setTimeout(() => {
         clearInterval(flicker);
         faces.forEach((t, i) => t.textContent = r.rolls[i] ?? "");
+        if (r.kept) fly.querySelectorAll(".die").forEach((el, i) => r.kept[i] === false && el.classList.add("dropped"));
         const banner = fly.querySelector(".banner");
         const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
-        banner.textContent = `${r.rolls.length > 1 || r.modifier ? r.rolls.join(" + ") + mod + " = " : ""}${r.total}` +
-          ("success" in r ? (r.success ? "  ✓ success" : "  ✗ failure") : "");
+        banner.textContent = `${r.rolls.length > 1 || r.modifier ? rollsText(r) + mod + " = " : ""}${r.total}` +
+          ("success" in r ? (r.success ? "  ✓ success" : "  ✗ failure") : "") +
+          (r.duality ? `  · ${r.duality.outcome === "critical" ? "critical!" : r.duality.outcome}` : "");
         banner.classList.add("show", ...("success" in r ? [r.success ? "ok" : "fail"] : []));
         setTimeout(() => { fly.classList.add("fade"); setTimeout(() => fly.remove(), 600); }, 1800);
       }, Math.max(0, 1250 - (Date.now() - t0)));
@@ -1111,7 +1188,7 @@ function rollDice(id) {
   const last = S.data.messages[S.data.messages.length - 1];
   const req = last?.roll_request;
   if (!req || req.id !== id) return;
-  const fly = diceFly(parseDice(req.dice));
+  const fly = diceFly(diceList(req.dice), isDuality(req.dice));
   runTurn(`/api/campaigns/${S.slug}/roll`, { id }, `🎲 ${req.prompt}…`, "roll", { rolled: (e) => fly.land(e.roll) })
     .finally(() => fly.cancel());
 }
@@ -1151,13 +1228,13 @@ $("diceBtn").onclick = openTray;
 $("trayFun").onclick = () => {
   const rolls = Array.from({ length: TRAY.count }, () => 1 + Math.floor(Math.random() * TRAY.sides));
   const r = { dice: trayNotation(), rolls, modifier: TRAY.mod, total: rolls.reduce((a, b) => a + b, 0) + TRAY.mod };
-  diceFly({ count: TRAY.count, sides: TRAY.sides }).land(r);
+  diceFly(Array(TRAY.count).fill(TRAY.sides)).land(r);
   $("trayResult").textContent = ` → ${r.rolls.join(" + ")}${r.modifier ? (r.modifier > 0 ? " + " : " − ") + Math.abs(r.modifier) : ""} = ${r.total} (just for fun)`;
 };
 $("traySend").onclick = () => {
   if (S.busy) return;
   const reason = $("trayReason").value.trim();
-  const fly = diceFly({ count: TRAY.count, sides: TRAY.sides });
+  const fly = diceFly(Array(TRAY.count).fill(TRAY.sides), isDuality(trayNotation()));
   closeTray();
   $("trayReason").value = "";
   runTurn(`/api/campaigns/${S.slug}/roll-free`, { dice: trayNotation(), reason }, `🎲 ${reason || trayNotation()}…`, "roll",
@@ -1330,7 +1407,8 @@ async function renderSheet(part) {
   const withPortrait = part === "character" && (S.imagesEnabled || S.data.portrait);
   const pt = withPortrait ? await api(`/api/campaigns/${S.slug}/portraits`) : null;
   const sh = d.sheet || {};
-  const fields = SHEET_PARTS[part];
+  const hidden = (d.pack && d.pack.hide_core) || [];
+  const fields = SHEET_PARTS[part].filter(f => !hidden.includes(f));
   $("drawerBody").innerHTML = `
     ${pt ? `<div class="portraitbox">
       <div class="pimg" id="shPortrait" style="${pt.current ? `background-image:url('/api/campaigns/${S.slug}/portraits/${pt.current}')` : ""}">${pt.current ? "" : "no portrait"}</div>
@@ -1339,6 +1417,8 @@ async function renderSheet(part) {
         ${pt.all.length > 1 ? `<div class="thumbs">${pt.all.map(n => `<img src="/api/campaigns/${S.slug}/portraits/${n}" data-name="${n}" class="${n === pt.current ? "cur" : ""}" title="Use this one">`).join("")}</div>` : ""}
       </div></div>` : ""}
     ${d.sheet ? "" : `<p class="muted">No sheet yet: the archivist starts one after the GM's first reply, or fill it in yourself.</p>`}
+    ${part === "character" && d.pack ? `<h3>${esc(d.pack.name)}</h3>${countersHTML(sh.resources)}${systemFieldsHTML(d.pack, sh.system || {})}<h3>About</h3>` :
+      part === "character" && sh.resources?.length ? countersHTML(sh.resources) : ""}
     ${sheetFieldsHTML(fields, sh, d.lists)}
     <p><button class="primary" id="saveSheet">Save</button> <span id="sheetMsg" class="muted"></span></p>
     <h3>Recent changes</h3>
@@ -1357,6 +1437,39 @@ async function renderSheet(part) {
     S.data.portrait = img.dataset.name; renderChat(false); renderSheet(part);
   });
   $("saveSheet").onclick = () => saveSheetFields(sh, () => renderSheet(part));
+  $("drawerBody").querySelectorAll("[data-res]").forEach(b => b.onclick = () => bumpCounter(b.dataset.res, +b.dataset.delta, part));
+  $("drawerBody").querySelectorAll(".scores input").forEach(inp => inp.oninput = () => {
+    const m = inp.parentElement.querySelector(".mod"); if (m) m.textContent = modText(+inp.value, inp.dataset.mods);
+  });
+}
+function modText(v, kind) {
+  if (kind !== "dnd") return "";
+  const m = Math.floor((v - 10) / 2); return v ? (m >= 0 ? `+${m}` : `${m}`) : "";
+}
+function countersHTML(res) {
+  if (!res?.length) return "";
+  return `<div class="counters">${res.map(r => `<div class="counter"><span class="cname">${esc(r.name)}${r.marks ? ' <span class="muted small">(marked)</span>' : ""}</span>
+    <button data-res="${esc(r.name)}" data-delta="-1" title="One less">−</button><span class="cval">${r.current}${r.max ? ` / ${r.max}` : ""}</span>
+    <button data-res="${esc(r.name)}" data-delta="1" title="One more">+</button></div>`).join("")}</div>`;
+}
+function systemFieldsHTML(pack, sys) {
+  return pack.sheet.map(f => {
+    const v = sys[f.key];
+    if (f.type === "scores") return `<label>${esc(f.label)}</label><div class="scores">${f.names.map(n => {
+      const x = (v || {})[n] ?? 0;
+      return `<div><label>${esc(n)}</label><input type="number" data-sys="${f.key}" data-score="${esc(n)}" data-mods="${f.mods || ""}" value="${x}">${f.mods === "dnd" ? `<div class="mod">${modText(x, "dnd")}</div>` : ""}</div>`;
+    }).join("")}</div>`;
+    if (f.type === "list") return `<label>${esc(f.label)} <span class="muted">(one per line)</span></label><textarea data-sys="${f.key}" rows="${Math.max(2, (v || []).length + 1)}">${esc((v || []).join("\n"))}</textarea>`;
+    return `<label>${esc(f.label)}</label><input data-sys="${f.key}" ${f.type === "number" ? 'type="number"' : ""} value="${esc(v ?? "")}">`;
+  }).join("");
+}
+async function bumpCounter(name, delta, part) {
+  const d = await api(`/api/campaigns/${S.slug}/character`);
+  const sh = d.sheet; if (!sh) return;
+  const r = (sh.resources || []).find(x => x.name === name); if (!r) return;
+  r.current = Math.max(0, r.max ? Math.min(r.max, r.current + delta) : r.current + delta);
+  try { await api(`/api/campaigns/${S.slug}/character`, { method: "PUT", body: JSON.stringify(sh) }); await refreshSigs(); renderSheet(part); }
+  catch (e) { $("sheetMsg").textContent = e.message; }
 }
 function sheetFieldsHTML(fields, sh, lists) {
   return fields.map(f => lists.includes(f)
@@ -1369,6 +1482,13 @@ async function saveSheetFields(old, done) {
   $("drawerBody").querySelectorAll("[data-f]").forEach(el => {
     body[el.dataset.f] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.value;
   });
+  const sys = { ...(body.system || {}) };
+  $("drawerBody").querySelectorAll("[data-sys]").forEach(el => {
+    const k = el.dataset.sys;
+    if (el.dataset.score) sys[k] = { ...(sys[k] || {}), [el.dataset.score]: +el.value || 0 };
+    else sys[k] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.type === "number" ? +el.value || 0 : el.value;
+  });
+  if (Object.keys(sys).length) body.system = sys;
   try {
     await api(`/api/campaigns/${S.slug}/character`, { method: "PUT", body: JSON.stringify(body) });
     await refreshSigs(); done();

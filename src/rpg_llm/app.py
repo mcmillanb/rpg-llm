@@ -12,8 +12,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rpg_llm import (admin, arc, auth, cast, compactor, context, dice, images, panels,
-                     portrait, prompts, router, sheet, suggest, themes, wiki)
+from rpg_llm import (admin, arc, auth, cast, compactor, context, dice, images, packs, panels,
+                     portrait, prompts, router, session0, sheet, suggest, themes, wiki)
 from rpg_llm.config import ROLES, NotConfigured, Settings
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign, Vault
@@ -128,7 +128,7 @@ class Runtime:
                 st["error"] = f"scene tracking: {e}"
             try:
                 async with self.lock(c.slug):
-                    changed = await sheet.update(c, self.router)
+                    changed = None if session0.active(c.meta) else await sheet.update(c, self.router)
                 if changed:
                     st["last_sheet"] = {**changed, "at": time.time()}
                 # a payment the sheet refused: the GM hears about it next turn
@@ -174,6 +174,18 @@ class Runtime:
             st["cast_catchup"] = None
             self.casting.discard(c.slug)
         await self.paint_people(c)
+
+    async def after_session0(self, c: Campaign) -> None:
+        """The story arc from the character the player built, and their portrait."""
+        await self.run_quietly(arc.generate(c, self.archiver), "story arc after session 0")
+        cfg = self.settings.app.images
+        if cfg.enabled and not portrait.current(c) and c.meta.get("appearance"):
+            async def paint():
+                d = await portrait.describe(self.dm, c.meta.get("system") or "", c.meta.get("premise") or "",
+                                            c.meta.get("appearance") or "")
+                look = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
+                portrait.add(c, await portrait.paint(cfg, look, d["prompt"]), d["prompt"])
+            await self.run_quietly(paint(), "portrait after session 0")
 
     async def paint_people(self, c: Campaign) -> None:
         """Give everyone in the cast with a description a small portrait, one at a time, newest
@@ -308,7 +320,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     refused = st.get("money_refused")
     if refused and refused["after"] != (messages[-2]["id"] if len(messages) > 1 else None):
         refused = None  # only for the turn right after it
-    notes = "\n\n".join(p for p in (context.style_reminder(c.meta), sheet.notes_block(sheet.load(c)),
+    notes = "\n\n".join(p for p in (context.style_reminder(c.meta), sheet.notes_block(sheet.load(c), packs.for_campaign(c.meta)),
                                      sheet.money_note(refused),
                                      cast.notes_block(c, messages), notes) if p) or None
     info["notes"] = notes
@@ -325,7 +337,15 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
 
     convo = context.build(c, state, messages, notes)
     tools = list(wiki.TOOLS) if c.gazetteer() else []  # nothing to look up yet
+    duality = bool((packs.for_campaign(c.meta) or {}).get("duality"))
     mode = context.table(c.meta)["dice"]
+    in_session0 = session0.active(c.meta)
+    if in_session0:
+        tools += session0.TOOLS
+    pack = packs.for_campaign(c.meta)
+    lookup_ok = packs.has_reference(pack) and (packs.rules_mode(c.meta) or pack.get("primer_in_story"))
+    if lookup_ok:
+        tools.append(packs.LOOKUP_TOOL)
     if mode == "auto":
         tools.append(dice.TOOL)
     elif mode == "virtual":
@@ -367,6 +387,10 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                 stats["rounds"] += 1
                 stats["prompt_ms"] += u.get("prompt_ms") or 0
                 stats["completion_tokens"] += u.get("completion_tokens") or 0
+        if not calls and "<tool_call>" in round_content:
+            parsed, round_content = dice.tool_calls_from_text(round_content)
+            if parsed:
+                calls = parsed
         content += round_content
         if not calls and not content.strip() and not rolls and not retried:
             # the model sometimes ends its turn at once, with no text at all: ask once more
@@ -394,12 +418,36 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                 try:
                     args = json.loads(tc["arguments"] or "{}")
                     r = dice.roll(str(args.get("dice", "")), str(args.get("reason", "")),
-                                  args.get("target"), args.get("success_if") or "at_least")
+                                  args.get("target"), args.get("success_if") or "at_least",
+                                  duality=duality)
                     rolls.append(r)
                     result = dice.describe(r)
                     yield sse({"type": "roll", **r})
                 except (ValueError, TypeError, json.JSONDecodeError) as e:
                     result = f"Error: {e}"
+            elif tc["name"] == "rules_lookup" and lookup_ok:
+                try:
+                    q = str(json.loads(tc["arguments"] or "{}").get("query", ""))
+                except json.JSONDecodeError:
+                    q = ""
+                result = packs.lookup(pack["id"], q)
+                yield sse({"type": "tool", "name": "rules_lookup", "arguments": tc["arguments"]})
+            elif tc["name"] in ("update_character", "finish_session0") and in_session0:
+                try:
+                    args = json.loads(tc["arguments"] or "{}")
+                except json.JSONDecodeError as e:
+                    args, result = None, f"Error: {e}"
+                if args is not None and tc["name"] == "update_character":
+                    result = session0.update(c, args, user["id"])
+                    yield sse({"type": "sheet"})
+                elif args is not None:
+                    result = session0.finish(c, args, user["id"])
+                    if result is None:  # the sheet isn't complete: the GM is told what's missing
+                        result = args["_refusal"]
+                    else:
+                        in_session0 = False
+                        rt.spawn(rt.after_session0(c))
+                        yield sse({"type": "status", "text": "session 0 complete: the adventure begins…"})
             else:
                 result = wiki.run_tool(c, tc["name"], tc["arguments"])
                 yield sse({"type": "tool", "name": tc["name"], "arguments": tc["arguments"]})
@@ -480,6 +528,7 @@ class NewCampaign(BaseModel):
     portrait: str = ""  # token of a portrait made during setup
     appearance: str = ""
     tone: str = ""  # the system picker's description; the GM's default tone
+    mode: str = "story"  # "rules": the system's own sheet and a session 0 (needs a system pack)
 
 
 class PortraitAsk(BaseModel):
@@ -718,17 +767,24 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             c.save_meta({**c.meta, "owner": auth.current().username})
         t = context.table({"consequences": body.consequences, "dice": body.dice,
                            "style": body.style, "length": body.length})
+        pack = packs.match(body.system)
         theme = body.theme if body.theme in themes.THEMES or body.theme == themes.PLAIN \
-            else themes.default_for(body.system, body.genre)
-        tone = body.tone.strip() or suggest.tone_for(R().vault.root, body.system)
+            else (pack or {}).get("theme") or themes.default_for(body.system, body.genre)
+        tone = body.tone.strip() or suggest.tone_for(R().vault.root, body.system) or \
+            (pack or {}).get("blurb", "")
+        rules = body.mode == "rules" and pack is not None
         c.save_meta({**c.meta, "allow_rewind": body.allow_rewind, **t, "theme": theme,
                      **({"tone": tone} if tone else {}),
+                     **({"pack": pack["id"]} if pack else {}),
+                     **({"mode": "rules", "session0": True} if rules else {"mode": "story"}),
                      **({"appearance": body.appearance.strip()} if body.appearance.strip() else {})})
+        if rules:  # the system's own blank sheet, filled in during session 0
+            sheet.save(c, sheet.blank(pack), 0, "blank sheet for session 0")
         cand = portrait.candidate_path(R().vault.root, body.portrait)
         if cand:
             portrait.add(c, cand.read_bytes())
         rt = R()
-        if rt.configured:
+        if rt.configured and not rules:  # in Rules mode, session 0 builds both
             async def setup():
                 if body.premise.strip():
                     await rt.run_quietly(sheet.create_start(c, rt.archiver), "starting sheet")
@@ -827,7 +883,15 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def suggest_systems(refresh: bool = False):
         rt = R()
         rt.require_configured()
-        return await suggest.systems(rt.dm, rt.vault.root, refresh)
+        out = await suggest.systems(rt.dm, rt.vault.root, refresh)
+        listed = {packs.match(s["name"])["id"] for s in out["systems"] if packs.match(s["name"])}
+        extra = [p for p in packs.picker_entries() if p["pack"] not in listed]
+        return {**out, "systems": [*out["systems"], *extra]}
+
+    @app.get("/api/packs/match")
+    async def match_pack(system: str = ""):
+        p = packs.match(system)
+        return {"pack": {"id": p["id"], "name": p["name"]} if p else None}
 
     @app.post("/api/suggest/premise")
     async def suggest_premise(body: PremiseAsk):
@@ -850,6 +914,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             msgs[-1] = {**msgs[-1], "roll_request": req,
                         **({"content": pasted[1]} if pasted else {})}
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
+                "session0": session0.active(c.meta),
+                "duality": bool((packs.for_campaign(c.meta) or {}).get("duality")),
                 "table": context.table(c.meta),
                 "portrait": portrait.current(c),
                 "show_details": bool(c.meta.get("show_details")),
@@ -938,6 +1004,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
     async def get_character(slug: str):
         c = R().campaign(slug)
         return {"sheet": sheet.load(c), "fields": list(sheet.FIELDS), "lists": list(sheet.LISTS),
+                "pack": packs.public(packs.for_campaign(c.meta)) if packs.rules_mode(c.meta) else None,
                 "history": [{k: h[k] for k in ("after", "ts", "what")}
                             for h in sheet.history(c)[-10:]][::-1]}
 
@@ -1031,7 +1098,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         req = pending_roll(c, msgs)
         if not req or req["id"] != body.id:
             raise HTTPException(409, "That roll isn't waiting any more.")
-        r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"))
+        r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"),
+                      duality=bool((packs.for_campaign(c.meta) or {}).get("duality")))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})
         return stream_turn(rt, c, first={"type": "rolled", "roll": r, "message": entry})
 
@@ -1043,7 +1111,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         rt.require_configured()
         c = rt.campaign(slug)
         try:
-            r = dice.roll(body.dice, body.reason.strip()[:120])
+            r = dice.roll(body.dice, body.reason.strip()[:120],
+                          duality=bool((packs.for_campaign(c.meta) or {}).get("duality")))
         except ValueError as e:
             raise HTTPException(400, str(e))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})

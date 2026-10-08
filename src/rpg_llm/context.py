@@ -6,7 +6,7 @@ the per-turn GM notes ride on the final user message, so the server only process
 
 import re
 
-from rpg_llm import prompts, suggest
+from rpg_llm import packs, prompts, session0, suggest
 from rpg_llm.vault import Campaign, State, estimate_tokens
 
 
@@ -48,6 +48,18 @@ def system_prompt(campaign: Campaign, state: State) -> str:
              f"world moving and to offer leads)\n\n{arc}\n"
              if arc else ""),
     )
+    pack = packs.for_campaign(meta)
+    rules = packs.rules_mode(meta)
+    if pack and (rules or pack.get("primer_in_story")):
+        text += f"\n# Rules: {pack['name']}\n\n{pack['rules']}\n"
+        if packs.has_reference(pack):
+            text += ("\nThe official rules text is available through the rules_lookup tool: look up any "
+                     "class, subclass, ancestry, community, domain card, feature, weapon, armour, item, "
+                     "adversary or rule you need exactly, instead of guessing, and use what it says.\n")
+        if rules:
+            text += f"\n{prompts.RULES_MODE}\n"
+    if session0.active(meta):
+        text += "\n" + session0.prompt(meta) + "\n"
     if state.fold:
         text += f"\n# Earlier in this session (condensed)\n\n{state.fold['summary']}\n"
     return text

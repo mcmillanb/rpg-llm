@@ -1,0 +1,35 @@
+id: dnd5e2024
+# paused: not offered yet (the sheet and session 0 need the same work Daggerheart got)
+enabled: false
+name: "D&D 5e (2024 rules)"
+genre: Fantasy
+blurb: "Heroic fantasy adventure with the 2024 Player's Handbook rules: classes, spells and dungeons."
+# matched against the campaign's game system (lower case, whole words)
+matches: ["d&d", "dnd", "dungeons & dragons", "dungeons and dragons", "5e", "5.5e", "d&d 2024"]
+theme: fantasy
+currency: GP
+check: 1D20
+# the Story-mode GM knows D&D well enough without the rules summary
+primer_in_story: false
+hide_core: [skills]
+sheet:
+  - {key: species, label: Species, type: text}
+  - {key: class, label: "Class and subclass", type: text}
+  - {key: level, label: Level, type: number}
+  - {key: background, label: Background, type: text}
+  - {key: abilities, label: Ability scores, type: scores, names: [STR, DEX, CON, INT, WIS, CHA], mods: dnd}
+  - {key: proficiency_bonus, label: Proficiency bonus, type: number}
+  - {key: armor_class, label: Armor Class, type: number}
+  - {key: initiative, label: Initiative, type: text}
+  - {key: speed, label: Speed, type: text}
+  - {key: saves, label: Saving throw proficiencies, type: list}
+  - {key: proficiencies, label: "Skills, tools and languages", type: list}
+  - {key: features, label: "Class features, species traits and feats", type: list}
+  - {key: attacks, label: "Weapons and attacks (bonus to hit, damage)", type: list}
+  - {key: spellcasting, label: "Spellcasting (ability, save DC, attack bonus)", type: text}
+  - {key: spells, label: "Spells (cantrips and prepared spells)", type: list}
+resources:
+  - {name: Hit Points, max: 0}
+  - {name: Temporary HP, max: 0}
+  - {name: Hit Dice, max: 1}
+  - {name: Heroic Inspiration, max: 1}

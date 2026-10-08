@@ -1249,3 +1249,109 @@ def test_payments_are_added_up_in_code():
                                              {"amount": 50.5, "direction": "in"}]) == "Cr 1,000.50"
     assert sheet.apply_payments("12 gp", []) == "12 gp"
     assert sheet.apply_payments("unknown", [{"amount": 5, "direction": "in"}]) is None
+
+
+# ---- system packs, Rules mode, session 0 --------------------------------------------------
+
+def test_dice_notation_keep_and_duality(monkeypatch):
+    assert dice.canon("d20 + 5") == "1D20+5" and dice.canon("4d6kh3") == "4D6KH3"
+    assert dice.canon("2d12-1d6+1") == "2D12-1D6+1"
+    for bad in ("banana", "2d6kh3", "30d6", "d20++5"):
+        try:
+            dice.canon(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    seq = iter([3, 16, 5])  # randbelow results + 1 -> 4, 17, 6
+    monkeypatch.setattr(dice.secrets, "randbelow", lambda n: next(seq))
+    r = dice.roll("2D20KH1+5", "Attack", 15)
+    assert (r["rolls"], r["kept"], r["total"], r["success"]) == ([4, 17], [False, True], 22, True)
+    assert "[4] + 17 + 5 = 22" in dice.player_line(r)
+    seq2 = iter([6, 6, 2])  # Hope 7, Fear 7, d6 3: a critical
+    monkeypatch.setattr(dice.secrets, "randbelow", lambda n: next(seq2))
+    r = dice.roll("2D12+1D6+1", "Leap the gap", 25, duality=True)
+    assert r["duality"] == {"hope": 7, "fear": 7, "outcome": "critical"} and r["success"]
+    assert "Hope 7, Fear 7 + 3 + 1 = 18" in dice.player_line(r) and "Critical" in dice.player_line(r)
+
+
+def test_packs_match_systems_and_shape_the_sheet():
+    from rpg_llm import packs
+    assert packs.match("Dungeons & Dragons 5e (2024 rules)") is None  # paused for now
+    assert packs.match("Daggerheart")["id"] == "daggerheart" and packs.match("Traveller") is None
+    dh = packs.get("daggerheart")
+    s = sheet.blank(dh)
+    assert s["system"]["traits"] == {n: 0 for n in ("Agility", "Strength", "Finesse", "Instinct", "Presence", "Knowledge")}
+    assert [r["name"] for r in s["resources"]][:3] == ["Hit Points", "Stress", "Hope"]
+    res = sheet.apply_resources(s["resources"], [{"name": "Hope", "change": 1}, {"name": "hit points", "change": -9},
+                                                 {"name": "Stress", "change": 2}, {"name": "Spell slots (1st)", "set": 2, "max": 2, "change": 0}])
+    by = {r["name"]: r["current"] for r in res}
+    assert by["Hope"] == 3 and by["Hit Points"] == 0 and by["Stress"] == 2 and by["Spell slots (1st)"] == 2
+    assert dice.standard_dice("Daggerheart") == {"dice": "2D12"}
+
+
+def test_rules_mode_session0_builds_the_character_then_starts(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    upd = {"fields": {"name": "Wren"}, "system": {"class": "Ranger", "traits": {"Agility": 2}, "ancestry": "Faun",
+                                                   "community": "Wildborne", "evasion": 12, "armor": "Leather Armor (3)",
+                                                   "thresholds": "7 / 14", "weapons": ["Shortbow (Agility, Far, d6+3)"],
+                                                   "experiences": ["Tracker +2", "Lone Wolf +2"],
+                                                   "domain_cards": ["Deft Deceiver"]},
+           "resources": [{"name": "Hit Points", "current": 6, "max": 6}]}
+    fin = {"premise": "Wren, a Faun ranger, hunts the thing that burned her village.",
+           "appearance": "A wiry faun with grey-green eyes and a longbow."}
+    dm = FakeLLM(stream_rounds=[
+        [{"tool_calls": [{"id": "1", "name": "update_character", "arguments": json.dumps(upd)}]}],
+        [{"content": "Ranger it is. Now your traits."}],
+        [{"tool_calls": [{"id": "2", "name": "finish_session0", "arguments": json.dumps(fin)}]}],
+        [{"content": "Smoke rises over the treeline as you reach the ridge."}],
+    ])
+    rt = Runtime(settings, dm=dm, router_llm=FakeLLM([verdict(False, 0.9)] * 4),
+                 archiver=FakeLLM(chat_reply="## Core conflict\nThe burning."))
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "Ash", "system": "Daggerheart",
+                                                   "mode": "rules", "dice": "virtual"}).json()["slug"]
+        data = client.get(f"/api/campaigns/{slug}").json()
+        assert data["session0"] and data["meta"]["pack"] == "daggerheart"
+        assert client.get(f"/api/campaigns/{slug}/character").json()["pack"]["id"] == "daggerheart"
+        sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "Let's make a ranger"}))
+        system_prompt = dm.calls[0][1][0]["content"]
+        assert "# Rules: Daggerheart" in system_prompt and "# Session 0" in system_prompt
+        assert "update_character" in [t["function"]["name"] for t in dm.calls[0][2]["tools"]]
+        sh = client.get(f"/api/campaigns/{slug}/character").json()["sheet"]
+        assert sh["name"] == "Wren" and sh["system"]["class"] == "Ranger" and sh["system"]["traits"]["Agility"] == 2
+        assert {r["name"]: r["current"] for r in sh["resources"]}["Hit Points"] == 6
+        sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "The burned village, please"}))
+        data = client.get(f"/api/campaigns/{slug}").json()
+        assert not data["session0"] and data["messages"][-1]["content"].startswith("Smoke rises")
+        assert "Faun ranger" in rt.vault.get(slug).brief
+        assert client.get(f"/api/campaigns/{slug}/character").json()["sheet"]["appearance"].startswith("A wiry faun")
+
+
+def test_session0_checks_names_and_reads_tool_calls_written_as_text(vault):
+    from rpg_llm import packs, session0
+    c = vault.create("T", system="Daggerheart")
+    c.save_meta({**c.meta, "pack": "daggerheart", "mode": "rules", "session0": True})
+    sheet.save(c, sheet.blank(packs.get("daggerheart")), 0, "blank")
+    out = session0.update(c, {"fields": {"community": "Slyborne", "money": 1},
+                              "system": {"abilities": {"Finesse": 2}, "domain_cards": ["Deft Deceiver", "Mist Walk"],
+                                         "ancestry": "Faun", "made_up": 3}}, 2)
+    s = sheet.load(c)["system"]
+    assert s["community"] == "Slyborne" and s["traits"]["Finesse"] == 2 and s["ancestry"] == "Faun"
+    assert s["domain_cards"] == ["Deft Deceiver"] and sheet.load(c)["money"] == "1 handfuls of gold"
+    assert "Mist Walk isn't in the Daggerheart rules" in out and "Not recorded (no such field): made_up" in out
+    calls, rest = dice.tool_calls_from_text("Let me check.\n<tool_call> <function=rules_lookup> "
+                                            "<parameter=query> Deft Deceiver </parameter> </function> </tool_call>")
+    assert calls[0]["name"] == "rules_lookup" and json.loads(calls[0]["arguments"]) == {"query": "Deft Deceiver"}
+    assert rest == "Let me check."
+
+
+def test_session0_wont_finish_with_gaps_once(vault):
+    from rpg_llm import packs, session0
+    c = vault.create("T", system="Daggerheart")
+    c.save_meta({**c.meta, "pack": "daggerheart", "mode": "rules", "session0": True})
+    sheet.save(c, sheet.blank(packs.get("daggerheart")), 0, "blank")
+    assert sheet.load(c)["money"] == "1 handful of gold"
+    args = {"premise": "A hero."}
+    assert session0.finish(c, args, 1) is None and "Weapons" in args["_refusal"]
+    assert session0.finish(c, {"premise": "A hero."}, 1)  # the second try goes through
+    assert not session0.active(c.meta)
