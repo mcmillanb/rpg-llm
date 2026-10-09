@@ -113,11 +113,10 @@ def daggerheart(root: Path) -> None:
 
 def dnd(root: Path) -> None:
     src = root / "src"
-    files = sorted(src.glob("[0-9][0-9]_*.md")) + sorted((src / "03_Classes").glob("[0-9][0-9]_*.md"))
     entries = []
-    for f in files:
-        if "Artificer" in f.name or f.name.startswith("00_Legal"):
-            continue  # not part of the 2024 rules
+    for f in sorted(src.glob("[0-9][0-9]_*.md")):
+        if f.name.startswith("00_Legal"):
+            continue
         text = f.read_text()
         m = re.match(r"#\s+(.+)", text)
         chapter = (m.group(1) if m else f.stem).strip()
@@ -125,14 +124,82 @@ def dnd(root: Path) -> None:
         level = 4 if any(k in chapter for k in ("Spells", "Feats", "Magic Items", "Monsters", "Animals",
                                                  "Glossary", "Equipment", "Origins")) else 3
         for e in split_sections(text, chapter, chapter.lower(), level):
-            # a spell or monster under its own name, not "Spells: Fireball"
-            if level == 4 and ": " in e["title"]:
+            if level == 4 and ": " in e["title"]:  # a spell or monster under its own name
                 e["title"] = e["title"].split(": ", 1)[1]
+            entries.append(e)
+    classes = []
+    for f in sorted((src / "03_Classes").glob("[0-9][0-9]_*.md")):
+        if "Artificer" in f.name or f.stem.endswith("_Classes"):
+            continue  # not part of the 2024 core rules
+        name = f.stem.split("_", 1)[1]
+        text = f.read_text()
+        classes.append((name, text))
+        for e in split_sections(text, name, "classes", 4):
+            # "Rogue: Level 1: Sneak Attack" -> "Sneak Attack (Rogue level 1)"
+            t = e["title"]
+            m = re.match(rf"{name}: Level (\d+): (.+)", t)
+            if m:
+                e["title"] = f"{m.group(2)} ({name} level {m.group(1)})"
+            elif t.startswith(f"{name}: {name} Subclass: "):
+                e["title"] = t.split(": ", 2)[2] + f" ({name} subclass)"
             entries.append(e)
     write("dnd5e2024", entries, "D&D System Reference Document 5.2, © Wizards of the Coast LLC, "
           "licensed under the Creative Commons Attribution 4.0 International License "
           "(https://creativecommons.org/licenses/by/4.0/legalcode). Markdown conversion from "
           "github.com/gelatinous-labs/dndsrd5.2_markdown.\n\n" + (root / "License.md").read_text()[:400])
+
+    # session 0: the options, from the SRD
+    tidy = lambda t: re.sub(r" {2,}", " ", re.sub(r"(\w) (\w{1,3}) (\w)", lambda m: m.group(0), t))
+    out = ["## Options (D&D SRD 5.2; the player's own Player's Handbook has more)"]
+    out.append("\n### Classes\n")
+    for name, text in classes:
+        traits = dict(re.findall(r"^\|\s*([A-Z][^|]+?)\s*\|\s*(.+?)\s*\|\s*$", text, re.M))
+        l1 = re.findall(r"^#### Level 1: (.+)$", text, re.M)
+        sub = re.search(r"^### \w+ Subclass: (.+)$", text, re.M)
+        out.append(f"**{name}**: hit die {traits.get('Hit Point Die', '?').split(' per')[0]}; primary "
+                   f"{traits.get('Primary Ability', '?')}; saves {traits.get('Saving Throw Proficiencies', '?')}; "
+                   f"skills {traits.get('Skill Proficiencies', '?')}; armour {traits.get('Armor Training', '?')}; "
+                   f"weapons {traits.get('Weapon Proficiencies', '?')}; level 1 features: {', '.join(l1)}; "
+                   f"subclass at level 3 (SRD): {sub.group(1) if sub else '?'}. Starting equipment: "
+                   f"{traits.get('Starting Equipment', '?')}")
+    origins = (src / "04_CharacterOrigins.md").read_text()
+    out.append("\n### Backgrounds\n")
+    for m in re.finditer(r"^#{2,4} \**(Acolyte|Criminal|Sage|Soldier)\**\s*\n(.*?)(?=^#{2,4} )", origins, re.M | re.S):
+        body = " ".join(x.strip() for x in m.group(2).strip().splitlines() if x.strip())
+        out.append(f"**{m.group(1)}**: {re.sub(r'[*]', '', body)}")
+    out.append("\n### Species\n")
+    species = origins[origins.index("### Species Descriptions"):]
+    for m in re.finditer(r"^#### (\w+)\s*\n(.*?)(?=^#### |\Z)", species, re.M | re.S):
+        body = m.group(2)
+        size = re.search(r"\*\*Size:\*\*\s*(.+)", body)
+        speed = re.search(r"\*\*Speed:\*\*\s*(.+)", body)
+        feats = re.findall(r"^\*\*\*?([A-Z][^.*]+?)\.\*?\*\*", body, re.M)
+        out.append(f"**{m.group(1)}**: {size.group(1).strip() if size else '?'}; speed "
+                   f"{speed.group(1).strip() if speed else '?'}; traits: {', '.join(feats)}")
+    feats = (src / "05_Feats.md").read_text()
+    origin_feats = feats[feats.index("### Origin Feats"):feats.index("### General Feats")]
+    out.append("\n### Origin feats\n")
+    for m in re.finditer(r"^#### ([^\n]+)\n(.*?)(?=^#### |\Z)", origin_feats, re.M | re.S):
+        body = " ".join(x.strip() for x in m.group(2).strip().splitlines() if x.strip())
+        out.append(f"**{m.group(1)}**: {re.sub(r'[*]', '', body)[:260]}…")
+    eq = (src / "06_Equipment.md").read_text()
+    out.append("\n### Weapons and armour\n")
+    for cap in ("Simple Melee Weapons", "Simple Ranged Weapons", "Martial Melee Weapons", "Martial Ranged Weapons",
+                "Light Armor", "Medium Armor", "Heavy Armor", "Shield"):
+        m = re.search(rf"^Table: {cap}.*\n\n((?:\|.*\n)+)", eq, re.M)
+        if m:
+            out.append(f"{cap}:\n\n" + re.sub(r" {2,}", " ", m.group(1)))
+    spells = (src / "07_Spells.md").read_text()
+    lists: dict[str, dict[str, list]] = {}
+    for m in re.finditer(r"^#### (.+)\n\n\*(Level 1 \w+|\w+ Cantrip) \(([^)]+)\)", spells, re.M):
+        lvl = "cantrips" if "Cantrip" in m.group(2) else "level 1"
+        for cls in m.group(3).split(","):
+            lists.setdefault(cls.strip(), {}).setdefault(lvl, []).append(m.group(1).strip())
+    out.append("\n### Spells by class (cantrips; level 1)\n")
+    for cls, d in sorted(lists.items()):
+        out.append(f"**{cls}**: cantrips: {', '.join(d.get('cantrips', [])) or '—'}. Level 1: {', '.join(d.get('level 1', [])) or '—'}.")
+    out.append("\nLook each one up (rules_lookup) for the exact text before recording it.")
+    (PACKS / "dnd5e2024" / "creation_official.md").write_text("\n".join(out) + "\n")
 
 
 if __name__ == "__main__":

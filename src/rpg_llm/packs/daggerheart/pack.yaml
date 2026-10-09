@@ -33,5 +33,6 @@ resources:
   - {name: Hope, max: 6, current: 2}
   - {name: Armor Slots, max: 3, current: 0, marks: true}
   - {name: GM Fear, max: 12, current: 1}
+explain: {class: classes, ancestry: ancestries, community: communities}
 # names written onto the sheet must exist in the rules reference (field: reference category)
 checks: {ancestry: ancestries, community: communities, domain_cards: abilities, weapons: weapons, armor: armor}

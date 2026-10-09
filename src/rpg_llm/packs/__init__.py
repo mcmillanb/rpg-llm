@@ -162,5 +162,29 @@ def options(pack: dict, field: str) -> list[str]:
     return sorted(_titles(pack["id"], category).values()) if category else []
 
 
+def entry(pack_id: str, category: str, name: str) -> dict | None:
+    """The reference entry with exactly this name in a category."""
+    key = _key(re.split(r"\s*[(:]|\s+[-–]\s+", name)[0])
+    return next((e for e in reference(pack_id) if e["category"] == category and _key(e["title"]) == key), None)
+
+
+def explain(pack: dict, field: str, name: str) -> str:
+    """The rules text for a choice, for the GM: the entry itself and, for a class, its level 1
+    features (filed under the class's name in the reference)."""
+    category = (pack.get("explain") or {}).get(field)
+    e = entry(pack["id"], category, name) if category else None
+    if not e and category and len(name.split()) > 1:  # "Wood Elf" is filed under "Elf"
+        e = entry(pack["id"], category, name.split()[-1]) or entry(pack["id"], category, name.split()[0])
+    if not e:
+        return ""
+    text = e["text"][:2500]
+    if category == "classes":  # D&D: level 1 features are their own entries
+        feats = [x for x in reference(pack["id"]) if x["category"] == "classes"
+                 and x["title"].endswith(f"({e['title']} level 1)")]
+        for f in feats:
+            text += f"\n\n{f['title']}: {f['text'][:700]}"
+    return f"{e['title']}: rules text (use it exactly):\n{text}"
+
+
 def has_reference(pack: dict | None) -> bool:
     return bool(pack) and (DIR / pack["id"] / "reference.jsonl").exists()

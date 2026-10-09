@@ -1276,7 +1276,7 @@ def test_dice_notation_keep_and_duality(monkeypatch):
 
 def test_packs_match_systems_and_shape_the_sheet():
     from rpg_llm import packs
-    assert packs.match("Dungeons & Dragons 5e (2024 rules)") is None  # paused for now
+    assert packs.match("Dungeons & Dragons 5e (2024 rules)")["id"] == "dnd5e2024"
     assert packs.match("Daggerheart")["id"] == "daggerheart" and packs.match("Traveller") is None
     dh = packs.get("daggerheart")
     s = sheet.blank(dh)
@@ -1355,3 +1355,43 @@ def test_session0_wont_finish_with_gaps_once(vault):
     assert session0.finish(c, args, 1) is None and "Weapons" in args["_refusal"]
     assert session0.finish(c, {"premise": "A hero."}, 1)  # the second try goes through
     assert not session0.active(c.meta)
+
+
+def test_dnd_session0_warns_about_names_outside_the_free_rules(vault):
+    from rpg_llm import packs, session0
+    c = vault.create("T", system="D&D 5e (2024 rules)")
+    c.save_meta({**c.meta, "pack": "dnd5e2024", "mode": "rules", "session0": True})
+    sheet.save(c, sheet.blank(packs.get("dnd5e2024")), 0, "blank")
+    assert sheet.load(c)["system"]["proficiency_bonus"] == 2 and sheet.load(c)["system"]["level"] == 1
+    out = session0.update(c, {"system": {"species": "Aasimar", "background": "Acolyte",
+                                         "abilities": {"STR": 15, "Dex": 14}, "spells": ["Guidance", "Healing Word"]}}, 2)
+    s = sheet.load(c)["system"]
+    assert s["species"] == "Aasimar" and s["abilities"]["STR"] == 15 and s["abilities"]["DEX"] == 14
+    assert "not in the free rules reference: Aasimar" in out and "Acolyte" not in out.split("free rules")[-1]
+
+
+def test_session0_hands_the_gm_the_rules_for_a_choice_and_checks_numbers(vault):
+    from rpg_llm import packs, session0
+    c = vault.create("T", system="D&D 5e (2024 rules)")
+    c.save_meta({**c.meta, "pack": "dnd5e2024", "mode": "rules", "session0": True})
+    sheet.save(c, sheet.blank(packs.get("dnd5e2024")), 0, "blank")
+    out = session0.update(c, {"system": {"class": "Cleric (Level 1)", "species": "Dwarf",
+                                         "abilities": {"STR": 14, "DEX": 10, "CON": 18, "INT": 8, "WIS": 21, "CHA": 12}}}, 2)
+    assert "Cleric: rules text" in out and "Divine Order (Cleric level 1)" in out and "Dwarf: rules text" in out
+    assert "d8 maximum 8 + CON +4 = 12" in out and "above 20" in out
+    assert "spell save DC 8 + 5 + 2 = 15" in out
+    again = session0.update(c, {"system": {"class": "Cleric"}}, 3)
+    assert "Cleric: rules text" not in again  # once is enough
+    assert session0.fix_dice(c.meta, "4D6") == "4D6KH3" and session0.fix_dice(c.meta, "1D20") == "1D20"
+
+
+def test_dnd_numbers_check_scores_against_the_rolls():
+    from rpg_llm import packs, session0
+    p = packs.get("dnd5e2024")
+    sh = {"system": {"class": "Ranger", "background": "Soldier",
+                     "abilities": {"STR": 9, "DEX": 15, "CON": 12, "INT": 12, "WIS": 15, "CHA": 11}}}
+    out = session0.dnd_numbers(p, sh, [13, 12, 11, 8, 10, 14])
+    assert "+6 over the six rolled" in out and "WIS isn't one of the rolls" in out and "spell save DC 8 + 2 + 2 = 12" in out
+    good = {"system": {**sh["system"], "abilities": {"STR": 9, "DEX": 15, "CON": 10, "INT": 12, "WIS": 14, "CHA": 11}}}
+    assert "over the six rolled" not in session0.dnd_numbers(p, good, [13, 12, 11, 8, 10, 14])
+    assert packs.explain(p, "species", "Wood Elf").startswith("Elf: rules text")

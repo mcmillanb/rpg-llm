@@ -569,16 +569,16 @@ function openNewCampaign() {
   $("modal").innerHTML = `<div class="sheet ui">
     <div class="sheethead"><strong>New campaign</strong><button id="nClose">✕</button></div>
     <label>Name</label><input id="nName" placeholder="Traveller: The Spinward Run">
+    <div id="nModeWrap">
+      <label>How close to the rules?</label>
+      <select id="nMode"><option value="story">Story: a simple sheet, rules held lightly</option><option value="rules" id="nModeRules">Rules: the game's real sheet, and a session 0 to build your character</option></select>
+      <div class="muted small" id="nModeNote"></div>
+    </div>
     <label>Game system / setting</label>
     <select id="nSystemPick"><option value="">Loading what the GM knows…</option></select>
     <div id="nSystemBlurb" class="muted small"></div>
     <input id="nSystem" class="hidden" placeholder="Any game or setting, e.g. Mothership, or your own world">
     <div class="muted small"><a id="nRefresh">↻ ask the GM again</a></div>
-    <div id="nModeWrap" class="hidden">
-      <label>How close to the rules?</label>
-      <select id="nMode"><option value="story">Story: a simple sheet, rules held lightly</option><option value="rules" id="nModeRules">Rules</option></select>
-      <div class="muted small" id="nModeNote"></div>
-    </div>
     <div class="two">
       <div><label>Writing style</label><select id="nStyle">
         <option value="plain" selected>Plain: practical, matter-of-fact</option>
@@ -643,7 +643,7 @@ function openNewCampaign() {
   api("/api/themes").then(t => { $("nLook").innerHTML += Object.entries(t).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join(""); }).catch(() => {});
   $("nRefresh").onclick = () => loadSystems(true);
   $("nSystemPick").onchange = systemChanged;
-  $("nMode").onchange = modeChanged;
+  $("nMode").onchange = () => { fillSystems(); modeChanged(); };
   $("nSystem").addEventListener("change", checkPack);
   $("nSuggest").onclick = () => suggestPremise(true);
   if (S.imagesEnabled) {
@@ -662,14 +662,14 @@ function openNewCampaign() {
   $("create").onclick = async () => {
     const name = $("nName").value.trim(); if (!name) return $("nName").focus();
     const { slug } = await api("/api/campaigns", { method: "POST", body: JSON.stringify({
-      name, system: chosenSystem(), premise: PACK && $("nMode").value === "rules" ? "" : $("nPremise").value,
+      name, system: chosenSystem(), premise: $("nMode").value === "rules" ? "" : $("nPremise").value,
       dm_instructions: $("nExtra").value,
       allow_rewind: $("nRewind").checked, consequences: $("nConseq").value, dice: $("nDice").value,
       style: $("nStyle").value, length: $("nLength").value,
       theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
       portrait: PORT.at >= 0 ? PORT.history[PORT.at].token : "",
       tone: SYSTEMS.find(x => x.name === chosenSystem())?.blurb || "",
-      mode: PACK ? $("nMode").value : "story",
+      mode: PACK && $("nMode").value === "rules" ? "rules" : "story",
       appearance: S.imagesEnabled ? $("nAppearance").value : "" }) });
     NEW = { seed: "", history: [], at: -1 };
     PORT = { history: [], at: -1 };
@@ -685,14 +685,23 @@ async function loadSystems(refresh) {
   try {
     SYSTEMS = (await api(`/api/suggest/systems${refresh ? "?refresh=1" : ""}`)).systems;
   } catch (e) { SYSTEMS = []; }
+  fillSystems();
+}
+// Rules mode lists only the games with a system pack; Story mode lists everything (games with a
+// pack are marked, so it's clear which ones Rules mode would offer).
+function fillSystems() {
+  const pick = $("nSystemPick"), rules = $("nMode").value === "rules", was = pick.value;
+  const list = rules ? SYSTEMS.filter(s => s.pack) : SYSTEMS;
   const groups = {};
-  for (const s of SYSTEMS) (groups[s.genre || "Other"] ||= []).push(s);
-  pick.innerHTML = `<option value="">Choose a game system…</option>` +
+  for (const s of list) (groups[s.genre || "Other"] ||= []).push(s);
+  pick.innerHTML = `<option value="">${rules ? "Choose a game with full rules support…" : "Choose a game system…"}</option>` +
     Object.entries(groups).map(([g, items]) => `<optgroup label="${esc(g)}">${items.map(s =>
-      `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join("")}</optgroup>`).join("") +
-    `<option value="${OTHER}">Other (type your own)…</option>`;
+      `<option value="${esc(s.name)}">${esc(s.name)}${s.pack && !rules ? " ✦ rules mode" : ""}</option>`).join("")}</optgroup>`).join("") +
+    (rules ? "" : `<option value="${OTHER}">Other (type your own)…</option>`);
   pick.disabled = false;
-  if (!SYSTEMS.length) { pick.value = OTHER; systemChanged(); }
+  if ([...pick.options].some(o => o.value === was)) pick.value = was;
+  if (!SYSTEMS.length && !rules) { pick.value = OTHER; }
+  systemChanged();
 }
 function systemChanged() {
   const v = $("nSystemPick").value;
@@ -706,12 +715,10 @@ let PACK = null;
 async function checkPack() {
   const system = chosenSystem();
   try { PACK = system ? (await api(`/api/packs/match?system=${encodeURIComponent(system)}`)).pack : null; } catch { PACK = null; }
-  $("nModeWrap").classList.toggle("hidden", !PACK);
-  if (PACK) $("nModeRules").textContent = `Rules: the real ${PACK.name} sheet, and a session 0 to build your character`;
   modeChanged();
 }
 function modeChanged() {
-  const rules = PACK && $("nMode").value === "rules";
+  const rules = $("nMode").value === "rules";
   $("nModeNote").textContent = rules ? "Your character, their story and where the adventure starts all come out of session 0: the GM walks you through making your character with the real rules, as at a table, then builds the opening from your backstory." : "";
   $("nPremiseWrap").classList.toggle("hidden", !!rules);
   if (rules) $("nDice").value = "virtual";  // the player rolls their own dice, as at the table

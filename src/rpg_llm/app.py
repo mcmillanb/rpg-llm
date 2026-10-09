@@ -322,6 +322,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
         refused = None  # only for the turn right after it
     notes = "\n\n".join(p for p in (context.style_reminder(c.meta), sheet.notes_block(sheet.load(c), packs.for_campaign(c.meta)),
                                      sheet.money_note(refused),
+                                     session0.dice_note(c) if session0.active(c.meta) else "",
                                      cast.notes_block(c, messages), notes) if p) or None
     info["notes"] = notes
     st["last_context"] = info
@@ -408,8 +409,10 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
         for i, tc in enumerate(calls):
             if tc["name"] == "request_roll":
                 try:  # the player rolls next: end the turn here, outcome untold
-                    requested = dice.request(json.loads(tc["arguments"] or "{}"),
-                                             dice.roll_under_system(c.meta.get("system") or ""))
+                    rargs = json.loads(tc["arguments"] or "{}")
+                    if in_session0:
+                        rargs["dice"] = session0.fix_dice(c.meta, str(rargs.get("dice", "")))
+                    requested = dice.request(rargs, dice.roll_under_system(c.meta.get("system") or ""))
                     yield sse({"type": "roll_request", **requested})
                     break
                 except (ValueError, TypeError, json.JSONDecodeError) as e:
@@ -884,9 +887,20 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         rt = R()
         rt.require_configured()
         out = await suggest.systems(rt.dm, rt.vault.root, refresh)
-        listed = {packs.match(s["name"])["id"] for s in out["systems"] if packs.match(s["name"])}
-        extra = [p for p in packs.picker_entries() if p["pack"] not in listed]
-        return {**out, "systems": [*out["systems"], *extra]}
+        # a system with a pack appears once, as the pack (which offers Rules mode), where the
+        # model listed it or at the end
+        entries, seen = [], set()
+        by_pack = {p["pack"]: p for p in packs.picker_entries()}
+        for s_ in out["systems"]:
+            p = packs.match(s_["name"])
+            if p and p["id"] in by_pack:
+                if p["id"] not in seen:
+                    seen.add(p["id"])
+                    entries.append(by_pack[p["id"]])
+            else:
+                entries.append(s_)
+        entries += [p for pid, p in by_pack.items() if pid not in seen]
+        return {**out, "systems": entries}
 
     @app.get("/api/packs/match")
     async def match_pack(system: str = ""):

@@ -1,6 +1,4 @@
 id: dnd5e2024
-# paused: not offered yet (the sheet and session 0 need the same work Daggerheart got)
-enabled: false
 name: "D&D 5e (2024 rules)"
 genre: Fantasy
 blurb: "Heroic fantasy adventure with the 2024 Player's Handbook rules: classes, spells and dungeons."
@@ -8,6 +6,15 @@ blurb: "Heroic fantasy adventure with the 2024 Player's Handbook rules: classes,
 matches: ["d&d", "dnd", "dungeons & dragons", "dungeons and dragons", "5e", "5.5e", "d&d 2024"]
 theme: fantasy
 currency: GP
+# session 0 can't finish while any of these is empty
+required: [species, class, background, abilities, armor_class, saves, proficiencies, attacks]
+# names checked against the free rules (SRD 5.2); the player's own book has more, so only a warning
+checks: {species: character origins, background: character origins, spells: spells}
+check_mode: warn
+# when one of these is chosen in session 0, the GM is handed its rules text
+explain: {class: classes, species: character origins, background: character origins}
+# a bare 4D6 in session 0 is the ability-score roll: keep the best three
+session0_dice: {4D6: 4D6KH3}
 check: 1D20
 # the Story-mode GM knows D&D well enough without the rules summary
 primer_in_story: false
@@ -15,10 +22,10 @@ hide_core: [skills]
 sheet:
   - {key: species, label: Species, type: text}
   - {key: class, label: "Class and subclass", type: text}
-  - {key: level, label: Level, type: number}
+  - {key: level, label: Level, type: number, default: 1}
   - {key: background, label: Background, type: text}
   - {key: abilities, label: Ability scores, type: scores, names: [STR, DEX, CON, INT, WIS, CHA], mods: dnd}
-  - {key: proficiency_bonus, label: Proficiency bonus, type: number}
+  - {key: proficiency_bonus, label: Proficiency bonus, type: number, default: 2}
   - {key: armor_class, label: Armor Class, type: number}
   - {key: initiative, label: Initiative, type: text}
   - {key: speed, label: Speed, type: text}
