@@ -27,8 +27,10 @@ sheet:
   - {key: weapons, label: "Weapons (trait, range, damage)", type: list}
   - {key: domain_cards, label: Domain cards, type: list}
   - {key: features, label: "Class, subclass and ancestry features", type: list}
+# Hit Points, Stress and Armor Slots all count marks, as on the official sheet: damage marks Hit
+# Points, a rest clears them; max is the number of slots
 resources:
-  - {name: Hit Points, max: 6, current: 6}
+  - {name: Hit Points, max: 6, current: 0, marks: true}
   - {name: Stress, max: 6, current: 0, marks: true}
   - {name: Hope, max: 6, current: 2}
   - {name: Armor Slots, max: 3, current: 0, marks: true}

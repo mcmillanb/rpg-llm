@@ -166,7 +166,13 @@ def update(campaign: Campaign, args: dict, after: int) -> str:
     for r in args.get("resources") or []:
         name = str(r.get("name") or "").strip()
         old = next((x for x in res if x["name"].lower() == name.lower()), None)
-        if old:
+        if old and old.get("marks"):
+            # nothing is marked at creation: "Stress 6" or {current: 6, max: 6} is the number of
+            # slots (the GM once filled Stress and Armor Slots this way before play began)
+            size = r.get("max") if r.get("max") is not None else r.get("current")
+            if size is not None:
+                old.update(max=size, current=0)
+        elif old:
             old.update({k: r[k] for k in ("current", "max") if r.get(k) is not None})
         elif name:
             res.append({"name": name, "current": r.get("current", 0), "max": r.get("max", 0)})
@@ -271,9 +277,12 @@ def finish(campaign: Campaign, args: dict, after: int) -> str | None:
             "session0_done": time.time()}
     if args.get("appearance"):
         meta["appearance"] = str(args["appearance"]).strip()
-        sh = sheet.load(campaign)
-        if sh:
-            sheet.save(campaign, {**sh, "appearance": meta["appearance"]}, after, "session 0")
+    sh = sheet.load(campaign)
+    if sh:  # play starts with nothing marked, whatever was written along the way
+        res = [{**r, "current": 0} if r.get("marks") else r for r in sh.get("resources") or []]
+        if res != sh.get("resources") or args.get("appearance"):
+            sheet.save(campaign, {**sh, "resources": res, "appearance": meta.get("appearance") or sh["appearance"]},
+                       after, "session 0")
     campaign.save_meta(meta)
     campaign.write("brief.md", f"# {meta.get('name')}\n\n## Premise\n\n{premise or '(not set)'}\n")
     return ("Session 0 is complete and the sheet is saved. Now begin the adventure: describe the "

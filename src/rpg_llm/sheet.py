@@ -155,8 +155,18 @@ def clean(data: dict, pack: dict | None = None) -> dict:
     if pack or data.get("system"):
         out["system"] = clean_system(data.get("system") or {}, pack) if pack else data["system"]
     if data.get("resources") or pack:
-        out["resources"] = clean_resources(data.get("resources") or [])
+        out["resources"] = follow_pack(clean_resources(data.get("resources") or []), pack)
     return out
+
+
+def follow_pack(resources: list[dict], pack: dict | None) -> list[dict]:
+    """A counter the pack now counts as marks (Daggerheart Hit Points) but a sheet saved before
+    counted down: turn what's left into what's marked, once (the 'marks' flag is saved with it)."""
+    marks = {r["name"].lower() for r in (pack or {}).get("resources") or [] if r.get("marks")}
+    for r in resources:
+        if r["name"].lower() in marks and not r.get("marks"):
+            r["current"], r["marks"] = (r["max"] - r["current"] if r["max"] else 0), True
+    return resources
 
 
 def update_schema(pack: dict | None) -> dict:
@@ -189,12 +199,52 @@ def system_text(pack: dict | None, current: dict | None) -> str:
                    "fields; keep them to what the story establishes:")
         out += [f"- {f['key']}: {f['label']}" for f in pack.get("sheet") or []]
     res = (current or {}).get("resources") or []
+    marked = [r["name"] for r in res if r.get("marks")]
+    hp = next((r for r in res if r["name"].lower() == "hit points"), None)
+    damage = ("damage marks 2 Hit Points: Hit Points +2; a rest clears 1: Hit Points -1"
+              if hp and hp.get("marks") else "damage taken: Hit Points -8")
     out.append("Counters (" + (resources_text(res) or "none yet") + ") are changed only through "
-               "\"resources\": [{name, change, set, max}]: change is +/- (damage taken: Hit Points "
-               "-8; 1 Hope spent: Hope -1; Stress marked: Stress +1), set/max only to set a value "
-               "outright (null otherwise). Don't do the arithmetic, and leave the sheet's own "
-               "counter list as it is.")
+               "\"resources\": [{name, change, set, max}]: change is +/- (" + damage + "; 1 Hope "
+               "spent: Hope -1; Stress marked: Stress +1), set/max only to set a value outright "
+               "(null otherwise). Don't do the arithmetic, and leave the sheet's own counter list "
+               "as it is.")
+    if marked:
+        out.append(f"{', '.join(marked)} count marks: marking one is +1, clearing one is -1.")
+    if pack and pack.get("duality"):
+        out.append("The Hope and Fear a Duality roll itself gives (with Hope: Hope +1; with Fear: "
+                   "GM Fear +1; a critical: Hope +1 and Stress -1) are added automatically: don't "
+                   "report them. Do report Hope spent, Fear the GM spends, and anything else.")
     return "\n".join(out)
+
+
+def duality_changes(messages: list[dict]) -> list[dict]:
+    """What the exchange's Duality rolls give by the rules, worked out here rather than left to
+    the model (it often missed the GM's Fear: the narration rarely mentions it)."""
+    out = []
+    for m in messages:
+        for r in ([m["roll"]] if m.get("roll") else []) + list(m.get("rolls") or []):
+            outcome = (r.get("duality") or {}).get("outcome")
+            if outcome in ("with Hope", "critical"):
+                out.append({"name": "Hope", "change": 1, "set": None, "max": None})
+            if outcome == "critical":
+                out.append({"name": "Stress", "change": -1, "set": None, "max": None})
+            if outcome == "with Fear":
+                out.append({"name": "GM Fear", "change": 1, "set": None, "max": None})
+    return out
+
+
+def without_duality(reported: list[dict], auto: list[dict]) -> list[dict]:
+    """The model's counter changes, less the ones the rolls already account for (told not to,
+    it still sometimes reports the roll's own Hope)."""
+    gained = {a["name"].lower() for a in auto}
+    def dup(ch):
+        name, n = str(ch.get("name") or "").lower(), int(ch.get("change") or 0)
+        if ch.get("set") is not None or ch.get("max") is not None:
+            return False
+        return ((name == "hope" and "hope" in gained and n > 0) or
+                (name.endswith("fear") and "gm fear" in gained and n > 0) or
+                (name == "stress" and "stress" in gained and n < 0))
+    return [ch for ch in reported or [] if not dup(ch)]
 
 
 MAX_ITEMS = 12
@@ -365,11 +415,13 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     ask = [{"role": "system", "content": system}, {"role": "user", "content": task}]
     rechecked = None
     money_talk = bool(MONEY_WORDS.search(exchange))
+    auto = duality_changes(messages[-2:]) if pack and pack.get("duality") else []
 
     def read(res: dict) -> dict:
         sh = clean(res.get("sheet") or {}, pack)
         if current:  # counters: changes applied here, never the model's own list
-            changed = apply_resources(current.get("resources") or [], res.get("resources") or [])
+            reported = without_duality(res.get("resources"), auto) if auto else res.get("resources")
+            changed = apply_resources(current.get("resources") or [], auto + (reported or []))
             if changed or "resources" in current:
                 sh["resources"] = changed
         if current:  # money = the old amount plus the reported payments, added up here
@@ -396,11 +448,16 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     refused = new.pop("_refused", None)
     flag = (f"⚠ money would have gone to {refused}: left at {current['money']}, check it"
             if refused else None)
+    if auto and current is not None and new.get("resources") != current.get("resources"):
+        result["changed"] = True  # the roll's Hope or Fear, even if the model saw nothing else
     if current is not None and (not result.get("changed") or new == current):
         return {"changes": [flag], "refused": refused, "money": current["money"]} if refused else None
     if not new.get("name") and current is None:
         return None  # nothing usable yet
     changes = tidy_changes(result.get("changes") or [])
+    if auto:  # the model's own note of the roll's Hope would say it twice
+        changes = [c for c in changes if not re.search(r"\b(gain|gained|gains)\b.*\bhope\b", c, re.I)]
+        changes.insert(0, roll_note(auto))
     if flag or rechecked:
         changes.append(flag or rechecked)
     what = "; ".join(changes) or ("created" if current is None else "updated")
@@ -409,6 +466,11 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     if refused:
         out.update(refused=refused, money=new["money"])
     return out
+
+
+def roll_note(auto: list[dict]) -> str:
+    """'The roll: Hope +1, GM Fear +1' for the change log."""
+    return "The roll: " + ", ".join(f"{a['name']} {a['change']:+d}" for a in auto)
 
 
 def money_note(refused: dict | None) -> str:

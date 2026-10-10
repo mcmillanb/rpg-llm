@@ -13,10 +13,11 @@ ask instead about one person from their past who matters).
   "armor" with its Armor Score, the thresholds in "thresholds" (Major / Severe), the potion and
   class item in "gear". The handful of gold is already the money.
 - Record as you go: class and subclass (with the Foundation feature), ancestry and its two
-  features, community and its feature, traits, level 1, Evasion and Hit Points from the class,
-  Stress 6, Hope 2, Proficiency 1, weapons (trait, range, damage), armour with its thresholds plus
-  1 and its Armor Score as Armor Slots, the inventory, two Experiences at +2, and two level 1
+  features, community and its feature, traits, level 1, Evasion, Hit Points from the class (as
+  the counter's max), 6 Stress slots, Hope 2, Proficiency 1, weapons (trait, range, damage), armour
+  with its thresholds plus 1 and its Armor Score as the Armor Slots' max, the inventory, two
+  Experiences at +2, and two level 1
   domain cards. Ask the class's background questions, one or two at a time, and what they look
-  like.
+  like. Hit Points, Stress and Armor Slots are counted as marks: a new character has none marked.
 - Finish with two or three opening situations grown from their answers; when they choose, call
   finish_session0. You start play with 1 Fear.

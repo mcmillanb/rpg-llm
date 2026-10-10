@@ -1319,12 +1319,65 @@ def test_rules_mode_session0_builds_the_character_then_starts(tmp_path):
         assert "update_character" in [t["function"]["name"] for t in dm.calls[0][2]["tools"]]
         sh = client.get(f"/api/campaigns/{slug}/character").json()["sheet"]
         assert sh["name"] == "Wren" and sh["system"]["class"] == "Ranger" and sh["system"]["traits"]["Agility"] == 2
-        assert {r["name"]: r["current"] for r in sh["resources"]}["Hit Points"] == 6
+        hp = next(r for r in sh["resources"] if r["name"] == "Hit Points")
+        assert hp["max"] == 6 and hp["current"] == 0  # 6 slots, none marked
         sse_events(client.post(f"/api/campaigns/{slug}/chat", json={"content": "The burned village, please"}))
         data = client.get(f"/api/campaigns/{slug}").json()
         assert not data["session0"] and data["messages"][-1]["content"].startswith("Smoke rises")
         assert "Faun ranger" in rt.vault.get(slug).brief
         assert client.get(f"/api/campaigns/{slug}/character").json()["sheet"]["appearance"].startswith("A wiry faun")
+
+
+def test_daggerheart_counters_start_unmarked_and_count_marks(vault):
+    from rpg_llm import packs, session0
+    dh = packs.get("daggerheart")
+    c = vault.create("T", system="Daggerheart")
+    c.save_meta({**c.meta, "pack": "daggerheart", "mode": "rules", "session0": True})
+    sheet.save(c, sheet.blank(dh), 0, "blank")
+    # "Stress 6" and {current: 2, max: 2} are slot counts at creation, never marks
+    session0.update(c, {"system": {"stress": 6}, "resources": [
+        {"name": "Hit Points", "current": 5, "max": 5}, {"name": "Armor Slots", "current": 2, "max": 2},
+        {"name": "Hope", "current": 2, "max": 6}]}, 2)
+    by = {r["name"]: (r["current"], r["max"]) for r in sheet.load(c)["resources"]}
+    assert by["Hit Points"] == (0, 5) and by["Stress"] == (0, 6) and by["Armor Slots"] == (0, 2) and by["Hope"] == (2, 6)
+    assert "Hit Points marked 0/5" in sheet.notes_block(sheet.load(c), dh)
+    # a sheet saved when Hit Points counted down: what was left becomes what's marked, once
+    old = {**sheet.load(c), "resources": [{"name": "Hit Points", "current": 2, "max": 5}]}
+    once = sheet.clean(old, dh)["resources"][0]
+    assert once == {"name": "Hit Points", "current": 3, "max": 5, "marks": True}
+    assert sheet.clean({**old, "resources": [once]}, dh)["resources"][0]["current"] == 3
+
+
+async def test_duality_rolls_move_hope_and_fear_without_the_model(vault):
+    from rpg_llm import packs
+    dh = packs.get("daggerheart")
+    c = vault.create("T", system="Daggerheart")
+    c.save_meta({**c.meta, "pack": "daggerheart", "mode": "rules"})
+    start = {**sheet.blank(dh), "name": "Wren"}
+    start["resources"] = sheet.apply_resources(start["resources"], [{"name": "Stress", "set": 2}])
+    sheet.save(c, start, 0, "start")
+    reply = lambda res, changes=(): {"changes": list(changes), "changed": bool(res), "payments": [],
+                                     "resources": res, "sheet": sheet.load(c)}
+    count = lambda: {r["name"]: r["current"] for r in sheet.load(c)["resources"]}
+    roll = lambda outcome: {"total": 9, "duality": {"hope": 5, "fear": 4, "outcome": outcome}}
+    # with Fear: the GM's Fear goes up though the model reports nothing
+    c.append({"role": "user", "content": "🎲 sneak", "roll": roll("with Fear")})
+    c.append({"role": "assistant", "content": "A guard turns."})
+    out = await sheet.update(c, FakeLLM([reply([])]))
+    assert count()["GM Fear"] == 2 and out["changes"][0] == "The roll: GM Fear +1"
+    # with Hope: the model's own +1 for it isn't counted twice; Hope spent still is
+    c.append({"role": "user", "content": "🎲 leap", "roll": roll("with Hope")})
+    c.append({"role": "assistant", "content": "You land it and spend a Hope on your Experience."})
+    await sheet.update(c, FakeLLM([reply([{"name": "Hope", "change": 1, "set": None, "max": None},
+                                          {"name": "Hope", "change": -1, "set": None, "max": None},
+                                          {"name": "Hit Points", "change": 2, "set": None, "max": None}],
+                                         ["Gained 1 Hope from the roll", "Marked 2 Hit Points"])]))
+    assert count()["Hope"] == 2 and count()["Hit Points"] == 2
+    # a critical: Hope +1 and a Stress cleared
+    c.append({"role": "user", "content": "🎲 strike", "roll": roll("critical")})
+    c.append({"role": "assistant", "content": "A perfect blow."})
+    await sheet.update(c, FakeLLM([reply([{"name": "Stress", "change": -1, "set": None, "max": None}])]))
+    assert count()["Hope"] == 3 and count()["Stress"] == 1
 
 
 def test_session0_checks_names_and_reads_tool_calls_written_as_text(vault):
