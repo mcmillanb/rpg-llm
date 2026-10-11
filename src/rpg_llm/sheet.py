@@ -210,6 +210,8 @@ def system_text(pack: dict | None, current: dict | None) -> str:
                "as it is.")
     if marked:
         out.append(f"{', '.join(marked)} count marks: marking one is +1, clearing one is -1.")
+    if pack and pack.get("sheet_rules"):
+        out.append(pack["sheet_rules"].strip())
     if pack and pack.get("duality"):
         out.append("The Hope and Fear a Duality roll itself gives (with Hope: Hope +1; with Fear: "
                    "GM Fear +1; a critical: Hope +1 and Stress -1) are added automatically: don't "
@@ -402,11 +404,15 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     schema = update_schema(pack)
     fmt = lambda ms: "\n\n".join(f"{'PLAYER' if m['role'] == 'user' else 'GM'}: {m['content'][:3000]}"
                                   for m in ms)
-    exchange = fmt(messages[-2:])
+    # the exchange: everything since the GM's previous reply, so a roll the player followed up
+    # on ("sorry, it should be 2d12+d6+1") before the GM answered is still in it
+    start = next((i + 1 for i in range(len(messages) - 2, -1, -1)
+                  if messages[i]["role"] == "assistant"), 0)
+    exchange = fmt(messages[start:])
     # the exchange before, for context: a correction ("that's 211, not 200") only makes sense
     # next to what it corrects
     earlier = (f"\nPrevious exchange (already on the sheet; context only, don't apply it again):\n"
-               f"{fmt(messages[-4:-2])}\n" if len(messages) >= 4 else "")
+               f"{fmt(messages[max(0, start - 2):start])}\n" if start >= 2 else "")
     task = prompts.SHEET_TASK.format(
         sheet=yaml.safe_dump(current, sort_keys=False, allow_unicode=True) if current
         else "(no sheet yet: create it from the brief and this exchange)",
@@ -415,7 +421,7 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     ask = [{"role": "system", "content": system}, {"role": "user", "content": task}]
     rechecked = None
     money_talk = bool(MONEY_WORDS.search(exchange))
-    auto = duality_changes(messages[-2:]) if pack and pack.get("duality") else []
+    auto = duality_changes(messages[start:]) if pack and pack.get("duality") else []
 
     def read(res: dict) -> dict:
         sh = clean(res.get("sheet") or {}, pack)
@@ -443,8 +449,9 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
             # accepted, but say so: the first reading was impossible, the second may be a guess
             rechecked = f"⚠ first read gave {new['_refused']}; rechecked to {second['money']}, check it"
             result, new = again, second
-    if campaign.messages()[-1]["id"] != messages[-1]["id"]:
-        return None  # the turn was taken back meanwhile
+    if messages[-1]["id"] not in {m["id"] for m in campaign.messages()}:
+        return None  # the turn was taken back meanwhile (a new message since is fine: a quick
+        # damage roll used to throw this update away, and the roll's Fear with it)
     refused = new.pop("_refused", None)
     flag = (f"⚠ money would have gone to {refused}: left at {current['money']}, check it"
             if refused else None)

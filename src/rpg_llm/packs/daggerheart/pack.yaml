@@ -29,6 +29,12 @@ sheet:
   - {key: features, label: "Class, subclass and ancestry features", type: list}
 # Hit Points, Stress and Armor Slots all count marks, as on the official sheet: damage marks Hit
 # Points, a rest clears them; max is the number of slots
+# for the sheet update: what the GM's narration often leaves unsaid
+sheet_rules: >-
+  Using an Experience (its +2 on a roll) costs 1 Hope: Hope -1 whenever the player or the GM says
+  one is used, even if the GM doesn't mention the Hope. Marking an Armor Slot to reduce damage is
+  Armor Slots +1 (never -1), and the Hit Points marked are the reduced number. If the player says
+  they've already corrected the sheet, check the current sheet and change only what's still missing.
 resources:
   - {name: Hit Points, max: 6, current: 0, marks: true}
   - {name: Stress, max: 6, current: 0, marks: true}

@@ -1378,6 +1378,24 @@ async def test_duality_rolls_move_hope_and_fear_without_the_model(vault):
     c.append({"role": "assistant", "content": "A perfect blow."})
     await sheet.update(c, FakeLLM([reply([{"name": "Stress", "change": -1, "set": None, "max": None}])]))
     assert count()["Hope"] == 3 and count()["Stress"] == 1
+    # the player follows the roll up before the GM answers: the roll still counts
+    c.append({"role": "user", "content": "🎲 strike", "roll": roll("with Fear")})
+    c.append({"role": "user", "content": "Sorry, it should have been 2d12+d6+1"})
+    c.append({"role": "assistant", "content": "Roll again with the d6."})
+    llm = FakeLLM([reply([])])
+    await sheet.update(c, llm)
+    assert count()["GM Fear"] == 3 and "🎲 strike" in llm.calls[0][1][-1]["content"]
+    assert "Using an Experience" in llm.calls[0][1][-1]["content"]
+    # a quick damage roll arrives while the update is running: the update still stands
+    c.append({"role": "user", "content": "🎲 dodge", "roll": roll("with Fear")})
+    c.append({"role": "assistant", "content": "Roll damage: 1D8+2."})
+
+    class Racing(FakeLLM):
+        async def json(self, messages, schema, max_tokens=1500):
+            c.append({"role": "user", "content": "🎲 1D8+2 → 8"})
+            return await super().json(messages, schema, max_tokens)
+    await sheet.update(c, Racing([reply([])]))
+    assert count()["GM Fear"] == 4
 
 
 def test_session0_checks_names_and_reads_tool_calls_written_as_text(vault):
