@@ -1466,3 +1466,42 @@ def test_dnd_numbers_check_scores_against_the_rolls():
     good = {"system": {**sh["system"], "abilities": {"STR": 9, "DEX": 15, "CON": 10, "INT": 12, "WIS": 14, "CHA": 11}}}
     assert "over the six rolled" not in session0.dnd_numbers(p, good, [13, 12, 11, 8, 10, 14])
     assert packs.explain(p, "species", "Wood Elf").startswith("Elf: rules text")
+
+
+def test_d20_says_its_natural_number_and_great_weapon_fighting_floors_damage(monkeypatch):
+    from rpg_llm import packs
+    seq = iter([14])  # a 15 on the d20
+    monkeypatch.setattr(dice.secrets, "randbelow", lambda n: next(seq))
+    r = dice.roll("1D20+5", "Attack with greatsword")
+    assert r["natural"] == 15 and "not a natural 20, so not a critical" in dice.player_line(r)
+    seq = iter([19])
+    assert "Critical Hit" in dice.describe(dice.roll("1D20+5", "attack"))
+    # Jorik's sheet: Great Weapon Fighting and a greatsword (Two-Handed); a flail isn't
+    dnd = packs.get("dnd5e2024")
+    sh = {"system": {"features": ["Great Weapon Fighting: ..."],
+                     "attacks": ["Greatsword: +5 to hit, 2d6+3 slashing", "Flail: +5, 1d8+3", "Longbow: 1d8"]}}
+    weapons = packs.great_weapon_dice(dnd, sh)
+    assert weapons == [(2, 6)]
+    assert dice.great_weapon("2D6+3", "Roll 2D6+3", weapons) and dice.great_weapon("4D6+3", "crit damage", weapons)
+    assert not dice.great_weapon("1D20+5", "attack", weapons) and not dice.great_weapon("1D8+3", "flail", weapons)
+    assert not dice.great_weapon("2D6", "Second Wind", weapons)
+    assert packs.great_weapon_dice(dnd, {"system": {"features": [], "attacks": ["Greatsword"]}}) == []
+    seq = iter([1, 0])  # a 2 and a 1
+    r = dice.roll("2D6+3", "damage", floor=3)
+    assert r["total"] == 9 and r["raw"] == [2, 1] and "2→3 + 1→3" in dice.player_line(r)
+    assert "Great Weapon Fighting" in dice.player_line(r)
+
+
+async def test_a_silent_model_stops_the_turn_with_a_message():
+    import asyncio
+    from rpg_llm.llm import Stalled, guarded
+
+    async def silent():
+        yield {"reasoning": "hmm"}
+        await asyncio.sleep(5)
+        yield {"content": "late"}
+    got = []
+    with pytest.raises(Stalled, match="sent nothing"):
+        async for d in guarded(silent(), idle=0.05, total=10):
+            got.append(d)
+    assert got == [{"reasoning": "hmm"}]

@@ -97,14 +97,37 @@ def request(args: dict, roll_under_ok: bool = True) -> dict:
     return req
 
 
+# rolls that are never weapon damage, whatever their dice
+_NOT_DAMAGE = re.compile(r"heal|endurance|second wind|hit di|initiative|save|check|inspiration", re.I)
+
+
+def great_weapon(dice: str, reason: str, weapon_dice: list[tuple[int, int]]) -> bool:
+    """D&D Great Weapon Fighting: a damage roll for a two-handed melee weapon on the sheet (its
+    dice, or a multiple of them on a critical), with no d20 in it."""
+    try:
+        ts, _ = terms(dice)
+    except ValueError:
+        return False
+    if not weapon_dice or any(t["sides"] == 20 for t in ts) or _NOT_DAMAGE.search(reason or ""):
+        return False
+    first = ts[0]
+    return any(first["sides"] == sides and first["count"] % count == 0 and not first["keep"]
+               for count, sides in weapon_dice)
+
+
 def roll(dice: str, reason: str = "", target: int | None = None,
-         success_if: str = "at_least", duality: bool = False) -> dict:
+         success_if: str = "at_least", duality: bool = False, floor: int = 0) -> dict:
     """Roll it. `duality`: Daggerheart, where a roll starting 2D12 is the Hope die and the Fear
-    die: which is higher decides "with Hope" or "with Fear", and matching dice are a critical."""
+    die: which is higher decides "with Hope" or "with Fear", and matching dice are a critical.
+    `floor`: the first term's dice count at least this (Great Weapon Fighting: 1s and 2s are 3s)."""
     ts, mod = terms(dice)
     rolls, kept, parts, total = [], [], [], mod
-    for t in ts:
+    raw = []
+    for n, t in enumerate(ts):
         r = [secrets.randbelow(t["sides"]) + 1 for _ in range(t["count"])]
+        raw += r
+        if floor and n == 0:
+            r = [max(v, floor) for v in r]
         keep = [True] * len(r)
         if t["keep"]:
             order = sorted(range(len(r)), key=lambda i: r[i], reverse=t["keep"][0] == "h")
@@ -117,6 +140,11 @@ def roll(dice: str, reason: str = "", target: int | None = None,
            "total": total, "sides": [p["sides"] for p in parts for _ in p["rolls"]]}
     if not all(kept):
         out["kept"] = kept
+    if raw != rolls:
+        out["raw"] = raw  # the faces as they landed, before Great Weapon Fighting
+    d20 = [v for v, k, sd in zip(rolls, kept, out["sides"]) if k and sd == 20]
+    if len(d20) == 1:
+        out["natural"] = d20[0]
     if any(p["sign"] < 0 for p in parts):
         out["signs"] = [p["sign"] for p in parts for _ in p["rolls"]]
     if duality and ts[0]["count"] == 2 and ts[0]["sides"] == 12 and not ts[0]["keep"] and ts[0]["sign"] > 0:
@@ -135,7 +163,9 @@ def _dice_text(r: dict) -> str:
     """'17 + [6]' (a dropped die in brackets), or 'Hope 7, Fear 11' for Duality Dice."""
     kept = r.get("kept") or [True] * len(r["rolls"])
     signs = r.get("signs") or [1] * len(r["rolls"])
-    items = [(f"{v}" if k else f"[{v}]", sg) for v, k, sg in zip(r["rolls"], kept, signs)]
+    raw = r.get("raw") or r["rolls"]
+    items = [(f"{w}→{v}" if w != v else f"{v}" if k else f"[{v}]", sg)
+             for v, w, k, sg in zip(r["rolls"], raw, kept, signs)]
     if r.get("duality"):
         head, items = f"Hope {r['duality']['hope']}, Fear {r['duality']['fear']}", items[2:]
     else:
@@ -153,6 +183,22 @@ def _duality_note(r: dict) -> str:
             "with Fear": " With Fear: the GM gains 1 Fear, and on a failure the GM makes a move."}[d["outcome"]]
 
 
+def _d20_note(r: dict) -> str:
+    """The number on the d20, said outright: a total of 20 isn't a natural 20."""
+    nat = r.get("natural")
+    if nat == 20:
+        return " Natural 20 on the d20: an attack roll is a Critical Hit."
+    if nat == 1:
+        return " Natural 1 on the d20: an attack roll misses."
+    if nat is not None and r["total"] >= 20:
+        return f" The d20 shows {nat}: not a natural 20, so not a critical."
+    return ""
+
+
+def _gwf_note(r: dict) -> str:
+    return " Great Weapon Fighting: 1s and 2s counted as 3." if r.get("raw") else ""
+
+
 def describe(r: dict) -> str:
     """What the GM reads back."""
     mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
@@ -162,7 +208,7 @@ def describe(r: dict) -> str:
         text += f" Needed {need}: {'SUCCESS' if r['success'] else 'FAILURE'}"
         margin = abs(r["total"] - r["target"])
         text += f" (by {margin})." if margin else " (exactly)."
-    return text + _duality_note(r) + " Narrate from this result."
+    return text + _duality_note(r) + _d20_note(r) + _gwf_note(r) + " Narrate from this result."
 
 
 def player_line(r: dict) -> str:
@@ -174,7 +220,8 @@ def player_line(r: dict) -> str:
                  f"{'success' if r['success'] else 'failure'})")
     if r.get("duality"):
         text += f", {r['duality']['outcome']}." + _duality_note(r)
-    return text
+    note = _d20_note(r) + _gwf_note(r)
+    return text + ("." if note and not text.endswith(".") else "") + note
 
 
 ROLL_UNDER = ("cthulhu", "runequest", "basic roleplaying", "brp", "delta green", "warhammer",

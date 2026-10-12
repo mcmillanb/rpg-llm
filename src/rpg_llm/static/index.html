@@ -857,8 +857,9 @@ function rollsText(r) {
 function rollHTML(r) {
   const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
   const res = "target" in r ? ` vs ${r.target}${r.success_if === "at_most" ? "−" : "+"} ${r.success ? "✓ success" : "✗ failure"}` : "";
-  return `<div class="roll ${"success" in r ? (r.success ? "ok" : "fail") : ""}">🎲 <strong>${esc(r.reason || "Roll")}</strong> · ${esc(r.dice)}: ${rollsText(r)}${mod} = <strong>${r.total}</strong>${res} ${outcomeHTML(r)}</div>`;
+  return `<div class="roll ${"success" in r ? (r.success ? "ok" : "fail") : ""}">🎲 <strong>${esc(r.reason || "Roll")}</strong> · ${esc(r.dice)}: ${rollsText(r)}${mod} = <strong>${r.total}</strong>${res} ${outcomeHTML(r)}${gwfHTML(r)}</div>`;
 }
+function gwfHTML(r) { return r.raw ? ` <span class="muted small" title="1s and 2s count as 3">Great Weapon Fighting</span>` : ""; }
 function rollsHTML(rolls) { return rolls?.length ? `<div class="rolls">${rolls.map(rollHTML).join("")}</div>` : ""; }
 
 // ---- dice shapes ------------------------------------------------------------
@@ -917,7 +918,7 @@ function rolledHTML(r) {
   const sides = r.sides || diceList(r.dice);
   const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
   const res = "success" in r ? `<span class="res ${r.success ? "ok" : "fail"}">${r.success ? "✓ success" : "✗ failure"}</span>` : "";
-  return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${facesHTML(sides.slice(0, r.rolls.length), r.rolls, r.kept, !!r.duality)}${mod} = <strong>${r.total}</strong> ${needText(r) ? `<span class="muted">(${needText(r)})</span>` : ""} ${res} ${outcomeHTML(r)}</div>`;
+  return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${facesHTML(sides.slice(0, r.rolls.length), r.rolls, r.kept, !!r.duality)}${mod} = <strong>${r.total}</strong> ${needText(r) ? `<span class="muted">(${needText(r)})</span>` : ""} ${res} ${outcomeHTML(r)}${gwfHTML(r)}</div>`;
 }
 
 // ---- a portrait at full size -----------------------------------------------------------------

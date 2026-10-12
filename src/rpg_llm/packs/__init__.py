@@ -188,3 +188,36 @@ def explain(pack: dict, field: str, name: str) -> str:
 
 def has_reference(pack: dict | None) -> bool:
     return bool(pack) and (DIR / pack["id"] / "reference.jsonl").exists()
+
+
+@lru_cache
+def _weapon_rows(pack_id: str) -> dict[str, tuple[str, str]]:
+    """Weapon name -> (damage, properties) from the reference's weapon tables."""
+    out = {}
+    for e in reference(pack_id):
+        if e["category"] != "equipment" or "weapon" not in e["title"].lower():
+            continue
+        for line in e["text"].splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 3 and re.match(r"\d+d\d+", cells[1]):
+                out[_key(cells[0])] = (cells[1], cells[2])
+    return out
+
+
+def great_weapon_dice(pack: dict | None, sh: dict | None) -> list[tuple[int, int]]:
+    """D&D: with Great Weapon Fighting on the sheet, the damage dice (count, sides) of the
+    sheet's two-handed melee weapons (Two-Handed, or a Versatile weapon's two-handed die)."""
+    system = (sh or {}).get("system") or {}
+    if not pack or not any("great weapon fighting" in str(f).lower() for f in system.get("features") or []):
+        return []
+    rows, out = _weapon_rows(pack["id"]), []
+    for a in system.get("attacks") or system.get("weapons") or []:
+        row = rows.get(_key(re.split(r"\s*[(:,]", str(a))[0]))
+        if not row or "ammunition" in row[1].lower():
+            continue
+        versatile = re.search(r"Versatile \((\d+)d(\d+)\)", row[1])
+        die = versatile.groups() if versatile else (
+            re.match(r"(\d+)d(\d+)", row[0]).groups() if "two-handed" in row[1].lower() else None)
+        if die:
+            out.append((int(die[0]), int(die[1])))
+    return out

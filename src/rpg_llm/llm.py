@@ -1,7 +1,9 @@
 """Thin wrapper over any OpenAI-compatible chat completions endpoint."""
 
+import asyncio
 import json
 import re
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -120,3 +122,37 @@ def parse_json(text: str) -> dict:
         if not m:
             raise
         return json.loads(m.group(0))
+
+
+class Stalled(Exception):
+    """The model stopped sending, or ran past the time allowed; the message is for the player."""
+
+
+async def guarded(stream: AsyncIterator[dict], idle: float, total: float,
+                  started: float | None = None) -> AsyncIterator[dict]:
+    """The stream, given up on after `idle` seconds with nothing new or `total` seconds since
+    `started` (rather than the client's 15 minutes, with the page waiting in silence)."""
+    deadline = (started or time.monotonic()) + total
+    it = stream.__aiter__()
+    try:
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise Stalled(f"the GM model was still going after {total / 60:.0f} minutes, so the "
+                              "reply was stopped. Try again (↻); if it keeps happening, the model "
+                              "server may be busy or stuck.")
+            try:
+                d = await asyncio.wait_for(it.__anext__(), min(idle, left))
+            except StopAsyncIteration:
+                return
+            except TimeoutError:
+                if time.monotonic() >= deadline:
+                    continue  # reported above
+                raise Stalled(f"the GM model sent nothing for {idle / 60:.0f} minutes, so the reply "
+                              "was stopped. Try again (↻); if it keeps happening, the model server "
+                              "may be busy or stuck.") from None
+            yield d
+    finally:
+        aclose = getattr(it, "aclose", None)
+        if aclose:
+            await aclose()

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from rpg_llm import (admin, arc, auth, cast, compactor, context, dice, images, packs, panels,
                      portrait, prompts, router, session0, sheet, suggest, themes, wiki)
 from rpg_llm.config import ROLES, NotConfigured, Settings
-from rpg_llm.llm import NO_THINKING, LLMClient
+from rpg_llm.llm import NO_THINKING, LLMClient, guarded
 from rpg_llm.vault import Campaign, Vault
 
 log = logging.getLogger("rpg_llm")
@@ -298,12 +298,23 @@ class Runtime:
 
 # ---- the turn ---------------------------------------------------------------
 
+def roll_floor(c: Campaign, dice_text: str, reason: str) -> int:
+    """3 when Great Weapon Fighting applies to this roll (D&D, the style on the sheet, the dice
+    of a two-handed melee weapon there): 1s and 2s on its damage dice count as 3."""
+    if not packs.rules_mode(c.meta):
+        return 0
+    weapons = packs.great_weapon_dice(packs.for_campaign(c.meta), sheet.load(c))
+    return 3 if dice.great_weapon(dice_text, reason, weapons) else 0
+
+
 def sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
-    """Assumes the player's message is already the last active user message. Streams SSE."""
+async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: dict | None = None):
+    """Assumes the player's message is already the last active user message. Streams SSE.
+    `progress` counts what the model has sent so far (for the log if the turn is cut off)."""
+    progress = progress if progress is not None else {}
     st = rt.st(c.slug)
     st["error"] = None
     t_turn = time.time()
@@ -359,6 +370,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
     stats = {"prompt_tokens": 0, "cached_tokens": 0, "prompt_ms": 0, "completion_tokens": 0,
              "rounds": 0}
     t_dm = time.time()
+    t_dm_mono = time.monotonic()
+    progress.update(reasoning=0, content=0)
     retried = False
     yield sse({"type": "status", "text": ""})
     for n in range(MAX_TOOL_ROUNDS + 1):
@@ -366,7 +379,10 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
             kwargs.pop("tools", None)
         calls = None
         round_content = ""
-        async for d in rt.dm.stream(convo, **kwargs):
+        async for d in guarded(rt.dm.stream(convo, **kwargs), rt.settings.tuning.turn_idle_seconds,
+                               rt.settings.tuning.turn_max_seconds, t_dm_mono):
+            for k in ("reasoning", "content"):
+                progress[k] += len(d.get(k) or "")
             if "reasoning" in d:
                 reasoning += d["reasoning"]
                 yield sse({"type": "reasoning", "text": d["reasoning"]})
@@ -422,7 +438,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int]):
                     args = json.loads(tc["arguments"] or "{}")
                     r = dice.roll(str(args.get("dice", "")), str(args.get("reason", "")),
                                   args.get("target"), args.get("success_if") or "at_least",
-                                  duality=duality)
+                                  duality=duality, floor=roll_floor(c, str(args.get("dice", "")),
+                                                                    str(args.get("reason", ""))))
                     rolls.append(r)
                     result = dice.describe(r)
                     yield sse({"type": "roll", **r})
@@ -499,9 +516,16 @@ def stream_turn(rt: Runtime, c: Campaign, supersedes: list[int] | None = None,
         if first:
             yield sse(first)
         rt.turns[c.slug] = rt.turns.get(c.slug, 0) + 1
+        started, progress = time.time(), {}
         try:
-            async for chunk in play_turn(rt, c, supersedes or []):
+            async for chunk in play_turn(rt, c, supersedes or [], progress):
                 yield chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            # the page went away (closed, reloaded, or ↻ pressed): the reply is dropped
+            log.warning("DM turn %s cut off after %.0fs (page closed or turn retried); model had "
+                        "sent %s chars of thinking, %s of reply", c.slug, time.time() - started,
+                        progress.get("reasoning", 0), progress.get("content", 0))
+            raise
         except Exception as e:
             log.exception("turn failed")
             yield sse({"type": "error", "text": str(e)})
@@ -1113,7 +1137,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         if not req or req["id"] != body.id:
             raise HTTPException(409, "That roll isn't waiting any more.")
         r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"),
-                      duality=bool((packs.for_campaign(c.meta) or {}).get("duality")))
+                      duality=bool((packs.for_campaign(c.meta) or {}).get("duality")),
+                      floor=roll_floor(c, req["dice"], req["prompt"]))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})
         return stream_turn(rt, c, first={"type": "rolled", "roll": r, "message": entry})
 
@@ -1126,7 +1151,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         c = rt.campaign(slug)
         try:
             r = dice.roll(body.dice, body.reason.strip()[:120],
-                          duality=bool((packs.for_campaign(c.meta) or {}).get("duality")))
+                          duality=bool((packs.for_campaign(c.meta) or {}).get("duality")),
+                          floor=roll_floor(c, body.dice, body.reason))
         except ValueError as e:
             raise HTTPException(400, str(e))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})

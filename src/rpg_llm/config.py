@@ -85,6 +85,10 @@ class Tuning(BaseModel):
     # also file during play, once this many minutes pass without a message and at least two
     # scenes are waiting (0 = only after the idle time above)
     pause_compact_minutes: float = Field(5.0, ge=0)
+    # a GM reply gives up (with a message to the player) after this long with nothing from the
+    # model, or this long in all
+    turn_idle_seconds: float = Field(180.0, ge=10)
+    turn_max_seconds: float = Field(600.0, ge=30)
 
 
 def hash_password(password: str) -> str:
