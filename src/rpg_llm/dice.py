@@ -323,7 +323,8 @@ def standard_dice(system: str) -> dict:
     from rpg_llm import packs
     pack = packs.match(system)
     if pack and pack.get("check"):
-        return {"dice": pack["check"]}
+        return {"dice": pack["check"], **({"target": pack["check_target"], "success_if": "at_least"}
+                                          if pack.get("check_target") else {})}
     s = (system or "").lower()
     if any(k in s for k in ("traveller", "cepheus", "2d6")):
         return {"dice": "2D6", "target": 8, "success_if": "at_least"}

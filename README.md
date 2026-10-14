@@ -25,7 +25,7 @@ Each campaign also has:
   are real random rolls the GM asks for through a tool; it narrates from the result and can't
   invent one. **Rewinds** (editing your last move or re-rolling the GM's reply after seeing it)
   are off by default; you can always take a message back while the GM is still replying (Esc).
-- **Rules mode with a system pack (Daggerheart, and D&D 5e with the 2024 rules):** choose
+- **Rules mode with a system pack (Daggerheart, D&D 5e with the 2024 rules, and Traveller):** choose
   "Rules" first when creating a campaign (the system list then shows the games that support it)
   and you get the real character sheet (traits, Evasion, thresholds, Hit
   Points, Stress, Hope and Armor Slots as counters, Experiences, domain cards), a session 0
@@ -34,11 +34,15 @@ Each campaign also has:
   guessing. Daggerheart's Duality Dice show the Hope and Fear dice and roll "with Hope", "with
   Fear" or critical. Packs live in `src/rpg_llm/packs/`; the rules text is built from the free
   System Reference Documents by `scripts/build_srd.py` (Daggerheart SRD 2.0 under the Darrington
-  Press Community Gaming License; D&D SRD 5.2 under CC-BY-4.0; see each pack's
+  Press Community Gaming License; D&D SRD 5.2 under CC-BY-4.0; for Traveller the Cepheus Engine
+  SRD, the open version of Mongoose Traveller 1st edition, under the OGL 1.0a; see each pack's
   REFERENCE-LICENSE.md). For D&D, session 0 rolls ability scores on screen (4d6, drop the
   lowest), hands the GM each class's, species' and background's rules text as it's chosen, and
   checks the numbers (scores against the rolls, Hit Points, attack and spell bonuses); options
-  from the player's own Player's Handbook are allowed, with a note to confirm them.
+  from the player's own Player's Handbook are allowed, with a note to confirm them. For
+  Traveller, session 0 rolls the characteristics and then runs the careers term by term (a
+  failed survival roll is a mishap, not death), handing the GM each career's tables; damage
+  comes off the Strength, Dexterity and Endurance counters, which follow the characteristics.
 - **A character sheet** (money, loans, gear, injuries, skills, assets, companions, debts). New
   campaigns start with one written from the premise; the router updates it after every reply;
   you can edit it. The GM sees it every turn and keeps to it. The router reports each payment

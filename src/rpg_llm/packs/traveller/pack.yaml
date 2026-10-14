@@ -1,0 +1,43 @@
+id: traveller
+name: "Traveller (classic 2D6 rules)"
+genre: Science fiction
+blurb: "Classic far-future adventure: careers before play, 2D6 against 8+, starships, trade and danger between the stars."
+# matched against the campaign's game system (lower case, whole words)
+matches: ["traveller", "traveler", "cepheus", "cepheus engine", "mongoose traveller", "classic traveller", "megatraveller"]
+theme: scifi
+currency: Cr
+# session 0 can't finish while any of these is empty
+required: [characteristics, homeworld, careers]
+# careers must be ones in the rules reference (Cepheus Engine's 24); when one is chosen in session
+# 0, the GM is handed its tables
+checks: {careers: careers}
+explain: {careers: careers}
+check: 2D6
+check_target: 8
+# the GM model half-knows Traveller and mixes its editions: it gets the rules summary in both modes
+primer_in_story: true
+sheet:
+  - {key: characteristics, label: Characteristics, type: scores, names: [Str, Dex, End, Int, Edu, Soc], mods: traveller}
+  - {key: age, label: Age, type: number, default: 18}
+  - {key: homeworld, label: "Homeworld (name, trade codes, law level)", type: text}
+  - {key: careers, label: "Careers (terms, final rank)", type: list}
+  - {key: armor, label: "Armour (name, armour rating)", type: text}
+  - {key: weapons, label: "Weapons (damage, skill)", type: list}
+  - {key: benefits, label: "Benefits (passages, ship shares, pension, memberships)", type: list}
+  - {key: psionics, label: "Psionics (Psi strength, talents)", type: text}
+# damage comes off the physical characteristics themselves: these counters are their current
+# values, and their max follows the score on the sheet
+resources:
+  - {name: Strength, max: 0, score: Str}
+  - {name: Dexterity, max: 0, score: Dex}
+  - {name: Endurance, max: 0, score: End}
+damage_example: "6 damage taken: Endurance -6; healing 3 points: Endurance +3"
+# for the sheet update: what the GM's narration often leaves unsaid
+sheet_rules: >-
+  Damage comes off the physical characteristics, not Hit Points: the first hit all goes on
+  Endurance; when Endurance is 0 the rest goes on Strength or Dexterity (the player's choice), and
+  later hits are split as the player chooses. Armour's rating is taken off the damage first.
+  Healing restores points to the damaged characteristics: report it as Endurance/Strength/Dexterity
+  +N. Change the Characteristics scores themselves only for permanent changes (aging, augments,
+  training), never for damage. Skills are written Name-level ("Pilot-1", "Gun Combat (Slug
+  Pistol)-0").

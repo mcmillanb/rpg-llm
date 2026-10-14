@@ -156,6 +156,7 @@ def clean(data: dict, pack: dict | None = None) -> dict:
         out["system"] = clean_system(data.get("system") or {}, pack) if pack else data["system"]
     if data.get("resources") or pack:
         out["resources"] = follow_pack(clean_resources(data.get("resources") or []), pack)
+        follow_scores(out["resources"], out.get("system") or {}, pack)
     return out
 
 
@@ -167,6 +168,38 @@ def follow_pack(resources: list[dict], pack: dict | None) -> list[dict]:
         if r["name"].lower() in marks and not r.get("marks"):
             r["current"], r["marks"] = (r["max"] - r["current"] if r["max"] else 0), True
     return resources
+
+
+def follow_scores(resources: list[dict], system: dict, pack: dict | None, full: bool = False) -> None:
+    """Counters that are a characteristic's current value (Traveller: damage comes off Str, Dex
+    and End; pack resource 'score'): the max follows the score, and the damage taken stays the
+    same when the score changes. `full`: undamaged (session 0)."""
+    scores = next((system.get(f["key"]) for f in (pack or {}).get("sheet") or [] if f["type"] == "scores"), None)
+    for spec in (pack or {}).get("resources") or []:
+        v = (scores or {}).get(spec.get("score") or "")
+        r = next((x for x in resources if x["name"].lower() == spec["name"].lower()), None)
+        if not v or r is None:
+            continue
+        if full or not r["max"]:
+            r["current"] = v
+        elif r["max"] != v:
+            r["current"] = max(0, min(v, r["current"] + v - r["max"]))
+        r["max"] = v
+
+
+def modifier(score: int, kind: str | None) -> int | None:
+    """A characteristic's modifier: D&D (score - 10) / 2; Traveller score / 3 - 2."""
+    if kind == "dnd":
+        return (score - 10) // 2
+    if kind == "traveller":
+        return score // 3 - 2
+    return None
+
+
+def upp(scores: dict) -> str:
+    """Traveller's Universal Persona Profile: the six scores in pseudo-hex (Soc 12 -> C)."""
+    digits = "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+    return "".join(digits[min(int(v), len(digits) - 1)] if v else "?" for v in scores.values())
 
 
 def update_schema(pack: dict | None) -> dict:
@@ -202,7 +235,7 @@ def system_text(pack: dict | None, current: dict | None) -> str:
     marked = [r["name"] for r in res if r.get("marks")]
     hp = next((r for r in res if r["name"].lower() == "hit points"), None)
     damage = ("damage marks 2 Hit Points: Hit Points +2; a rest clears 1: Hit Points -1"
-              if hp and hp.get("marks") else "damage taken: Hit Points -8")
+              if hp and hp.get("marks") else (pack or {}).get("damage_example") or "damage taken: Hit Points -8")
     out.append("Counters (" + (resources_text(res) or "none yet") + ") are changed only through "
                "\"resources\": [{name, change, set, max}]: change is +/- (" + damage + "; 1 Hope "
                "spent: Hope -1; Stress marked: Stress +1), set/max only to set a value outright "
@@ -346,9 +379,17 @@ def notes_block(sheet: dict | None, pack: dict | None = None) -> str:
     for k, v in (sheet.get("system") or {}).items():
         if v in ("", 0, [], None) or (isinstance(v, dict) and not any(v.values())):
             continue
-        shown = ("; ".join(v) if isinstance(v, list) else
-                 ", ".join(f"{n} {x:+d}" if (pack and any(f.get("mods") == "plain" for f in pack["sheet"] if f["key"] == k)) else f"{n} {x}"
-                           for n, x in v.items()) if isinstance(v, dict) else v)
+        mods = next((f.get("mods") for f in (pack or {}).get("sheet") or [] if f["key"] == k), None)
+        if isinstance(v, list):
+            shown = "; ".join(v)
+        elif isinstance(v, dict) and mods == "plain":
+            shown = ", ".join(f"{n} {x:+d}" for n, x in v.items())
+        elif isinstance(v, dict) and mods == "traveller":
+            shown = ", ".join(f"{n} {x} (DM {modifier(x, mods):+d})" for n, x in v.items()) + f"; UPP {upp(v)}"
+        elif isinstance(v, dict):
+            shown = ", ".join(f"{n} {x}" for n, x in v.items())
+        else:
+            shown = v
         lines.append(f"{labels.get(k, k)}: {shown}")
     if sheet.get("resources"):
         lines.append(f"Counters: {resources_text(sheet['resources'])}")

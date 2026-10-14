@@ -1277,7 +1277,7 @@ def test_dice_notation_keep_and_duality(monkeypatch):
 def test_packs_match_systems_and_shape_the_sheet():
     from rpg_llm import packs
     assert packs.match("Dungeons & Dragons 5e (2024 rules)")["id"] == "dnd5e2024"
-    assert packs.match("Daggerheart")["id"] == "daggerheart" and packs.match("Traveller") is None
+    assert packs.match("Daggerheart")["id"] == "daggerheart" and packs.match("Call of Cthulhu") is None
     dh = packs.get("daggerheart")
     s = sheet.blank(dh)
     assert s["system"]["traits"] == {n: 0 for n in ("Agility", "Strength", "Finesse", "Instinct", "Presence", "Knowledge")}
@@ -1505,3 +1505,36 @@ async def test_a_silent_model_stops_the_turn_with_a_message():
         async for d in guarded(silent(), idle=0.05, total=10):
             got.append(d)
     assert got == [{"reasoning": "hmm"}]
+
+
+def test_traveller_pack_careers_characteristics_and_damage(vault):
+    from rpg_llm import dice, packs, session0
+    tr = packs.get("traveller")
+    assert packs.match("Mongoose Traveller 2e")["id"] == "traveller" and packs.match("Cepheus Engine")["id"] == "traveller"
+    assert dice.standard_dice("Traveller") == {"dice": "2D6", "target": 8, "success_if": "at_least"}
+    careers = packs.options(tr, "careers")
+    assert len(careers) == 24 and "Merchant" in careers and "Scout" in careers
+    assert "Survival Int 5+" in packs.lookup("traveller", "Merchant")
+    c = vault.create("T", system="Traveller")
+    c.save_meta({**c.meta, "pack": "traveller", "mode": "rules", "session0": True})
+    sheet.save(c, sheet.blank(tr), 0, "blank")
+    # the characteristics set the physical counters; the GM reads the DMs and the UPP back
+    out = session0.update(c, {"system": {"characteristics": {"Str": 7, "Dex": 10, "End": 9, "Int": 11, "Edu": 8, "Soc": 12}}}, 2)
+    assert "UPP 7A9B8C" in out and "Background skills: 3 + Edu DM +0 = 3" in out
+    by = lambda: {r["name"]: (r["current"], r["max"]) for r in sheet.load(c)["resources"]}
+    assert by() == {"Strength": (7, 7), "Dexterity": (10, 10), "Endurance": (9, 9)}
+    assert "Dex 10 (DM +1)" in sheet.notes_block(sheet.load(c), tr)
+    # a career is checked against the rules, and its tables are handed to the GM when chosen
+    out = session0.update(c, {"system": {"careers": ["Merchant: 2 terms, Fourth Officer", "Space Wizard: 1 term"]}}, 4)
+    assert "Space Wizard" in out and "Merchant: rules text" in out and "Fourth Officer" in out
+    assert sheet.load(c)["system"]["careers"] == ["Merchant: 2 terms, Fourth Officer"]
+    # damage comes off End; a lasting change to the score (aging) keeps the damage taken
+    sh = sheet.load(c)
+    sh["resources"] = sheet.apply_resources(sh["resources"], [{"name": "Endurance", "change": -4}])
+    sh["system"]["characteristics"]["End"] = 8
+    assert {r["name"]: r["current"] for r in sheet.clean(sh, tr)["resources"]}["Endurance"] == 4
+    sheet.save(c, sh, 6, "hurt")
+    # play starts undamaged
+    session0.update(c, {"system": {"homeworld": "Regina (Rich, law 4)"}}, 8)
+    assert session0.finish(c, {"premise": "A merchant officer between ships."}, 9)
+    assert by()["Endurance"] == (8, 8)

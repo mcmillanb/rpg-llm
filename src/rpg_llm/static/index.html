@@ -1455,8 +1455,9 @@ async function renderSheet(part) {
   });
 }
 function modText(v, kind) {
-  if (kind !== "dnd") return "";
-  const m = Math.floor((v - 10) / 2); return v ? (m >= 0 ? `+${m}` : `${m}`) : "";
+  if (kind !== "dnd" && kind !== "traveller") return "";
+  const m = kind === "dnd" ? Math.floor((v - 10) / 2) : Math.floor(v / 3) - 2;
+  return v ? (m >= 0 ? `+${m}` : `${m}`) : "";
 }
 function countersHTML(res) {
   if (!res?.length) return "";
@@ -1469,7 +1470,7 @@ function systemFieldsHTML(pack, sys) {
     const v = sys[f.key];
     if (f.type === "scores") return `<label>${esc(f.label)}</label><div class="scores">${f.names.map(n => {
       const x = (v || {})[n] ?? 0;
-      return `<div><label>${esc(n)}</label><input type="number" data-sys="${f.key}" data-score="${esc(n)}" data-mods="${f.mods || ""}" value="${x}">${f.mods === "dnd" ? `<div class="mod">${modText(x, "dnd")}</div>` : ""}</div>`;
+      return `<div><label>${esc(n)}</label><input type="number" data-sys="${f.key}" data-score="${esc(n)}" data-mods="${f.mods || ""}" value="${x}">${f.mods === "dnd" || f.mods === "traveller" ? `<div class="mod">${modText(x, f.mods)}</div>` : ""}</div>`;
     }).join("")}</div>`;
     if (f.type === "list") return `<label>${esc(f.label)} <span class="muted">(one per line)</span></label><textarea data-sys="${f.key}" rows="${Math.max(2, (v || []).length + 1)}">${esc((v || []).join("\n"))}</textarea>`;
     return `<label>${esc(f.label)}</label><input data-sys="${f.key}" ${f.type === "number" ? 'type="number"' : ""} value="${esc(v ?? "")}">`;

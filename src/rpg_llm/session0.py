@@ -154,7 +154,8 @@ def update(campaign: Campaign, args: dict, after: int) -> str:
     seen = set(campaign.meta.get("session0_explained") or [])
     explained = []
     for field in (pack.get("explain") or {}):
-        for value in [(args.get("system") or {}).get(field), (args.get("fields") or {}).get(field)]:
+        given = [(args.get("system") or {}).get(field), (args.get("fields") or {}).get(field)]
+        for value in [x for v in given for x in (v if isinstance(v, list) else [v])]:
             name = re.split(r"\s*[(:]|\s+[-–]\s+", str(value or ""))[0].strip()
             if name and f"{field}:{name.lower()}" not in seen:
                 text = packs.explain(pack, field, name)
@@ -184,6 +185,8 @@ def update(campaign: Campaign, args: dict, after: int) -> str:
                 f"{', '.join(sheet.FIELDS)}; system {', '.join(f['key'] for f in pack.get('sheet') or [])}.")
     if pack["id"] == "dnd5e2024":
         out += "\n\n" + dnd_numbers(pack, saved, rolled(campaign))
+    if pack["id"] == "traveller":
+        out += "\n\n" + traveller_numbers(saved)
     for text in explained:
         out += "\n\n" + text
     for field, bad in unconfirmed:
@@ -194,6 +197,19 @@ def update(campaign: Campaign, args: dict, after: int) -> str:
                 "Tell the player, then offer real options from the lists (look them up with "
                 "rules_lookup to check).")
     return out
+
+
+def traveller_numbers(sh: dict) -> str:
+    """The numbers the sheet implies, for the GM to check its own against."""
+    ch = (sh.get("system") or {}).get("characteristics") or {}
+    if not any(ch.values()):
+        return ""
+    dm = {k: sheet.modifier(v, "traveller") for k, v in ch.items() if v}
+    out = ("Worked out from the sheet: " + ", ".join(f"{k} {ch[k]} (DM {m:+d})" for k, m in dm.items())
+           + f"; UPP {sheet.upp(ch)}")
+    if "Edu" in dm:
+        out += f". Background skills: 3 + Edu DM {dm['Edu']:+d} = {3 + dm['Edu']}, at level 0"
+    return out + "."
 
 
 CASTING = {"Cleric": "WIS", "Druid": "WIS", "Ranger": "WIS", "Wizard": "INT", "Bard": "CHA",
@@ -278,8 +294,9 @@ def finish(campaign: Campaign, args: dict, after: int) -> str | None:
     if args.get("appearance"):
         meta["appearance"] = str(args["appearance"]).strip()
     sh = sheet.load(campaign)
-    if sh:  # play starts with nothing marked, whatever was written along the way
-        res = [{**r, "current": 0} if r.get("marks") else r for r in sh.get("resources") or []]
+    if sh:  # play starts with nothing marked and nothing damaged, whatever was written along the way
+        res = [{**r, "current": 0} if r.get("marks") else dict(r) for r in sh.get("resources") or []]
+        sheet.follow_scores(res, sh.get("system") or {}, packs.for_campaign(campaign.meta), full=True)
         if res != sh.get("resources") or args.get("appearance"):
             sheet.save(campaign, {**sh, "resources": res, "appearance": meta.get("appearance") or sh["appearance"]},
                        after, "session 0")
