@@ -645,9 +645,16 @@ def pending_roll(c: Campaign, msgs: list[dict]) -> dict | None:
         if pasted:
             return pasted[0]
         req = dice.request_from_text(text, str(last["id"]))
-        ask = None if req else dice.asked_roll(text)
-        return req or (dice.standard_request(ask, c.meta.get("system") or "", str(last["id"]))
-                       if ask else None)
+        if req:
+            return req
+        copied = dice.copied_roll_line(text)
+        if copied:  # "🎲 Second roll:" in the dice's own style: the dice of the request before it
+            before = next((m["roll_request"] for m in reversed(msgs[:-1]) if m.get("roll_request")), None)
+            req = dice.standard_request(copied, c.meta.get("system") or "", str(last["id"]))
+            return {**req, **({k: before[k] for k in ("dice", "target", "success_if") if k in before}
+                              if before else {}), "prompt": copied}
+        ask = dice.asked_roll(text)
+        return dice.standard_request(ask, c.meta.get("system") or "", str(last["id"])) if ask else None
     return None
 
 

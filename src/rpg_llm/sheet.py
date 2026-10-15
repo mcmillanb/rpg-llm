@@ -7,6 +7,7 @@ cache. Every version is snapshotted against the transcript, so rewinding a turn 
 what that turn did to the sheet.
 """
 
+import ast
 import json
 import re
 import time
@@ -91,10 +92,29 @@ def clean_system(data: dict, pack: dict) -> dict:
         elif f["type"] == "scores":
             got = v if isinstance(v, dict) else {}
             low = {str(k).lower()[:3]: val for k, val in got.items()}
-            out[f["key"]] = {n: _int(got.get(n, low.get(n.lower()[:3]))) for n in f["names"]}
+            out[f["key"]] = {n: max(0, _int(got.get(n, low.get(n.lower()[:3])))) for n in f["names"]}
         else:
-            out[f["key"]] = str(v or "").strip()[:300]
+            out[f["key"]] = plain_text(v)[:300]
     return out
+
+
+def plain_text(v) -> str:
+    """A text field's value as text, when the model gave a list or an object for it ("['Mesh
+    Armor: AR 5']", {'name': 'Mesh Armor', 'armour_rating': 5}) or such a value saved as text,
+    its quotes doubled at each save: "Mesh Armor (armour rating 5)"."""
+    if isinstance(v, str) and re.fullmatch(r"\s*[\[{].*[\]}]\s*", v, re.S):
+        try:
+            v = ast.literal_eval(re.sub(r"'+", "'", re.sub(r"\s+", " ", v)))
+        except (ValueError, SyntaxError):
+            pass
+    if isinstance(v, dict):
+        name = next((str(v[k]) for k in ("name", "item", "type") if v.get(k)), "")
+        rest = ", ".join(f"{str(k).replace('_', ' ')} {x}" for k, x in v.items()
+                         if str(x) != name and x not in (None, "", [], {}))
+        return f"{name} ({rest})" if name and rest else name or rest
+    if isinstance(v, list):
+        return "; ".join(t for t in (plain_text(i) for i in v) if t)
+    return str(v if v is not None else "").strip()
 
 
 def clean_resources(items: list) -> list[dict]:
@@ -185,6 +205,36 @@ def follow_scores(resources: list[dict], system: dict, pack: dict | None, full: 
         elif r["max"] != v:
             r["current"] = max(0, min(v, r["current"] + v - r["max"]))
         r["max"] = v
+
+
+def keep_scores(current: dict, sh: dict, pack: dict | None, damage: bool = True) -> None:
+    """In play, a characteristic whose current value is a damage counter (Traveller's Str, Dex,
+    End) doesn't drop: the model wrote damage into the score itself (Dex 5 -> -9). The drop is
+    taken as damage on the counter instead, unless the counter was changed already (or `damage`
+    is off: a damage roll is still to come)."""
+    key = next((f["key"] for f in (pack or {}).get("sheet") or [] if f["type"] == "scores"), None)
+    old = ((current.get("system") or {}).get(key) or {}) if key else {}
+    new = ((sh.get("system") or {}).get(key) or {}) if key else {}
+    for spec in (pack or {}).get("resources") or []:
+        name = spec.get("score")
+        if not name or not old.get(name) or new.get(name, 0) >= old[name]:
+            continue
+        drop = old[name] - new.get(name, 0)
+        new[name] = old[name]
+        r = next((x for x in sh.get("resources") or [] if x["name"].lower() == spec["name"].lower()), None)
+        before = next((x for x in current.get("resources") or [] if x["name"].lower() == spec["name"].lower()), None)
+        if r is not None:
+            if damage and before is not None and r["current"] == before["current"]:
+                r["current"] = max(0, before["current"] - drop)
+            r["max"] = old[name]
+            r["current"] = max(0, min(r["current"], r["max"]))
+
+
+def pending_damage(message: dict) -> bool:
+    """The GM's reply waits for a damage roll: what it does isn't known yet."""
+    from rpg_llm import dice
+    req = message.get("roll_request") or dice.request_from_text(message.get("content") or "", str(message.get("id")))
+    return bool(req) and bool(re.search(r"\bdamage\b", req.get("prompt") or "", re.I))
 
 
 def modifier(score: int, kind: str | None) -> int | None:
@@ -463,11 +513,16 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     rechecked = None
     money_talk = bool(MONEY_WORDS.search(exchange))
     auto = duality_changes(messages[start:]) if pack and pack.get("duality") else []
+    waiting_damage = pending_damage(messages[-1])
 
     def read(res: dict) -> dict:
         sh = clean(res.get("sheet") or {}, pack)
         if current:  # counters: changes applied here, never the model's own list
             reported = without_duality(res.get("resources"), auto) if auto else res.get("resources")
+            if waiting_damage:  # "roll 2D6-5 damage": taken when it's rolled, not guessed now
+                now = {r["name"].lower(): r["current"] for r in current.get("resources") or []}
+                reported = [ch for ch in reported or [] if _int(ch.get("change")) >= 0 and (
+                    ch.get("set") is None or _int(ch["set"]) >= now.get(str(ch.get("name")).lower(), 0))]
             changed = apply_resources(current.get("resources") or [], auto + (reported or []))
             if changed or "resources" in current:
                 sh["resources"] = changed
@@ -475,6 +530,8 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
             computed = apply_payments(current["money"], res.get("payments") or [] if money_talk else [])
             if computed is not None:
                 sh["money"] = computed
+        if current and pack and not campaign.meta.get("session0"):
+            keep_scores(current, sh, pack, damage=not waiting_damage)
         return guard(current, sh)
 
     result = await router.json(ask, schema, max_tokens=1800)

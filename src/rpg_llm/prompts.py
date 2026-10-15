@@ -418,6 +418,8 @@ Not yet: these change nothing until the story shows them done.
   ready once they're transferred") is not a sale: the character still has the items and the
   money is unchanged until the player accepts and the narration shows the exchange.
 - A job, deal or contract offered: not an obligation until the character accepts it.
+- Damage the GM asks to be rolled ("Roll 2D6-5 damage from the hit"): not taken yet. Counters
+  change when the roll's result is in, not before.
 
 - A suggestion to pay someone ("settle up with Darrow before he starts counting") is not a
   payment: the debt stays in obligations until the narration shows the money handed over.

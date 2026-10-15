@@ -1538,3 +1538,62 @@ def test_traveller_pack_careers_characteristics_and_damage(vault):
     session0.update(c, {"system": {"homeworld": "Regina (Rich, law 4)"}}, 8)
     assert session0.finish(c, {"premise": "A merchant officer between ships."}, 9)
     assert by()["Endurance"] == (8, 8)
+
+
+def test_a_gm_copying_the_dice_line_still_gets_a_roll_button(vault):
+    from rpg_llm.app import pending_roll
+    c = vault.create("T", system="Traveller")
+    c.save_meta({**c.meta, "dice": "virtual"})
+    c.append({"role": "user", "content": "I'll roll them all first."})
+    c.append({"role": "assistant", "content": "", "roll_request": {"id": "a1", "dice": "2D6", "prompt": "First roll"}})
+    c.append({"role": "user", "content": "🎲 First roll: 2D6 → 6 + 2 = 8", "roll": {"total": 8}})
+    c.append({"role": "assistant", "content": "Eight, a good start.\n\n🎲 **Second characteristic roll (for the pool):**"})
+    req = pending_roll(c, c.messages())
+    assert req["dice"] == "2D6" and req["prompt"] == "Second characteristic roll (for the pool)"
+    c.append({"role": "user", "content": "ok"})
+    c.append({"role": "assistant", "content": "🎲 First roll: 2D6 → 6 + 2 = 8 was great."})
+    assert pending_roll(c, c.messages()) is None
+
+
+def test_a_roll_asked_for_in_the_last_sentence_is_still_a_request():
+    from rpg_llm import dice
+    assert dice.asked_roll("Solid score, 5 is perfectly adequate. Roll for the third characteristic.") == \
+        "Roll for the third characteristic."
+    assert dice.asked_roll("We have four scores now.\n\nTwo left. What do you get for the fifth roll?")
+    assert dice.asked_roll("The guard waves you through. The door hisses shut behind you.") is None
+    assert dice.asked_roll("Do you want to roll them in order, or assign them?") is None
+
+
+async def test_traveller_damage_never_lowers_the_scores_and_waits_for_its_roll(vault):
+    from rpg_llm import dice, packs
+    tr = packs.get("traveller")
+    c = vault.create("T", system="Traveller")
+    c.save_meta({**c.meta, "pack": "traveller", "mode": "rules"})
+    sh = sheet.blank(tr)
+    sh.update(name="Kaelen", system={**sh["system"], "characteristics": {"Str": 5, "Dex": 5, "End": 5, "Int": 4, "Edu": 5, "Soc": 10}})
+    sheet.save(c, sheet.clean(sh, tr), 0, "start")
+    by = lambda: {r["name"]: (r["current"], r["max"]) for r in sheet.load(c)["resources"]}
+    assert by()["Dexterity"] == (5, 5)
+
+    def reply(scores, resources, armor="Cloth (AR 5)"):
+        new = sheet.load(c)
+        new["system"] = {**new["system"], "characteristics": {**new["system"]["characteristics"], **scores}, "armor": armor}
+        return {"changes": ["hurt"], "changed": True, "payments": [], "resources": resources, "sheet": new}
+
+    # the model wrote the damage into the scores (Dex 5 -> -9, End 0): the scores stay, the
+    # counters take it, never below 0
+    play(c, ("I take it on my Dexterity.", "The plasma burns you for 14."))
+    await sheet.update(c, FakeLLM([reply({"Dex": -9, "End": 0}, [{"name": "Dexterity", "change": -14}],
+                                         armor="['Mesh Armor: AR 5']")]))
+    got = sheet.load(c)
+    assert got["system"]["characteristics"]["Dex"] == 5 and got["system"]["characteristics"]["End"] == 5
+    assert by() == {"Strength": (5, 5), "Dexterity": (0, 5), "Endurance": (0, 5)}
+    assert got["system"]["armor"] == "Mesh Armor: AR 5"
+    assert sheet.plain_text({"name": "Mesh Armor", "armour_rating": 5}) == "Mesh Armor (armour rating 5)"
+    assert sheet.plain_text("{''''name'''': ''''Mesh Armor'''', ''''armour_rating'''':\n    5}") == \
+        "Mesh Armor (armour rating 5)"
+    # damage asked to be rolled isn't taken before the roll
+    play(c, ("I dodge!", "It clips you anyway.\n\nPlease roll **2D6-5** for damage from the hit."))
+    assert dice.request_from_text(c.messages()[-1]["content"], "k")["dice"] == "2D6-5"
+    await sheet.update(c, FakeLLM([reply({"Str": 3}, [{"name": "Strength", "change": -2}])]))
+    assert by()["Strength"] == (5, 5) and sheet.load(c)["system"]["characteristics"]["Str"] == 5

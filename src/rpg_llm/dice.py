@@ -235,7 +235,7 @@ def roll_under_system(system: str) -> bool:
 
 
 _TEXT_REQUEST = re.compile(
-    r"\broll\s+(?:a\s+|an\s+)?(\d*\s*d\s*(?:\d+|%)(?:\s*[+-]\s*\d+)?)"  # dice
+    r"\broll\s+(?:a\s+|an\s+)?[*_]*(\d*\s*d\s*(?:\d+|%)(?:\s*[+-]\s*\d+)?)[*_]*"  # dice, maybe **bold**
     r"\s*(?:\(([^)]*)\))?"                                                  # (Target 8+)
     r"(?:\s*(?:to|for)\s+([^.\n]{3,200}))?", re.I)
 
@@ -309,13 +309,29 @@ _ASK = re.compile(r"^\W*(?:please\s+|now,?\s+|go ahead and\s+)?(?:roll\b|make\s+
                   re.I)
 
 
+# ...or asked for the result in a question: "What do you get for the fifth roll?"
+_ASK_RESULT = re.compile(r"\bwhat (?:do|did) you (?:get|roll)\b|\broll(?:s)?\?\s*$", re.I)
+
+
 def asked_roll(text: str) -> str | None:
-    """The closing paragraph, if it asks the player to roll: 'Roll to snag the canister.'"""
+    """The closing paragraph, if it asks the player to roll ('Roll to snag the canister.'), or
+    its last sentence if that does ('Solid score. Roll for the third characteristic.')."""
     paras = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
     if not paras:
         return None
     last = paras[-1].strip("*_ ")
-    return last if len(last) <= 250 and _ASK.search(last) else None
+    if len(last) <= 250 and _ASK.search(last):
+        return last
+    end = re.split(r"(?<=[.!?])\s+", last)[-1].strip("*_ ")
+    return end if len(end) <= 160 and (_ASK.search(end) or _ASK_RESULT.search(end)) else None
+
+
+def copied_roll_line(text: str) -> str | None:
+    """A GM that asks for the next roll by copying the dice's own line ('🎲 Second characteristic
+    roll:') instead of calling request_roll: the reason, if the reply ends that way."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+    m = re.fullmatch(r"🎲\s*\**([^\n→=]{3,120}?)\**\s*:?\s*", paras[-1]) if paras else None
+    return m.group(1).strip().rstrip(":").strip() if m else None
 
 
 def standard_dice(system: str) -> dict:
