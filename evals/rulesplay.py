@@ -25,9 +25,23 @@ SYSTEMS = {
             "to make an honest name as an adventurer; quick, funny, a little greedy."),
     "traveller": ("Traveller", "A former scout who wants to see every world on the map; good with "
                   "ships and guns, owes money to the wrong people."),
+    "starforged": ("Ironsworn: Starforged", "A courier pilot searching the Forge for her missing sister; "
+                   "quick-witted, stubborn, and better with a ship than with people."),
+    "ironsworn": ("Ironsworn", "A hunter from a small village who swore to track down the beast that "
+                  "killed her brother; quiet, stubborn, deadly with a bow."),
 }
+# the dice tray's roll when the GM asks in words with no button
+TRAY = {"starforged": "1D6", "ironsworn": "1D6"}
 
 # play: every few turns a move that should change the sheet
+PUSH_IRONSWORN = [
+    "I swear an iron vow to see this through, whatever it takes.",
+    "I attack the nearest enemy with everything I've got.",
+    "We find somewhere safe, rest, and I tend my wounds.",
+    "I set out on the journey to where the trail leads.",
+    "I try to win this person's trust and make a real connection.",
+    "I push on to finish what I started here.",
+]
 PUSH = [
     "I attack the nearest enemy with my best weapon.",
     "I use one of my special abilities or resources to get an edge.",
@@ -142,15 +156,20 @@ async def main():
         d = get(base, f"/api/campaigns/{slug}")
         last = d["messages"][-1] if d["messages"] else None
         rr = (last or {}).get("roll_request")
-        asked = last and last["role"] == "assistant" and not rr and \
-            re.search(r"\broll\b", (last.get("content") or "").split("\n\n")[-1], re.I)
+        # the GM asking the player to roll (not "I'll roll on the oracle", "roll the truths")
+        asked = last and last["role"] == "assistant" and not rr and re.search(
+            r"\b(?:please roll|roll\s*\+|(?:you|go ahead and|now) roll|roll (?:a|your|for|to)\b|make (?:a|an|the|your)\b.{0,30}\broll)",
+            (last.get("content") or "").split("\n\n")[-1], re.I) and not re.search(
+            r"\b(?:I(?:'ll| will| can)?|let me|me to) roll|roll (?:on|them|it) (?:the )?(?:oracle|table)", 
+            (last.get("content") or "").split("\n\n")[-1], re.I)
         if rr:
             res = await asyncio.to_thread(stream, base, f"/api/campaigns/{slug}/roll", {"id": rr["id"]})
             said = f"[rolls {rr.get('dice')} for {rr.get('prompt', '')[:80]}]"
         elif asked and not text:  # asked in words with no button: the dice tray, as a player would
+            tray = TRAY.get(a.system, "2D6")
             res = await asyncio.to_thread(stream, base, f"/api/campaigns/{slug}/roll-free",
-                                          {"dice": "2D6", "reason": "the roll you asked for"})
-            said = "[dice tray: 2D6]"
+                                          {"dice": tray, "reason": "the roll you asked for"})
+            said = f"[dice tray: {tray}]"
         else:
             said = text or await player(llm, system, idea, d["messages"], SESSION0 if phase_name == "session0" else PLAY)
             res = await asyncio.to_thread(stream, base, f"/api/campaigns/{slug}/chat", {"content": said})
@@ -168,7 +187,8 @@ async def main():
         n += 1
     record("session0_done", steps=n, finished=not get(base, f"/api/campaigns/{slug}")["session0"])
     for i in range(1, a.turns + 1):
-        push = PUSH[(i // 3) % len(PUSH)] if i % 3 == 0 else None
+        pushes = PUSH_IRONSWORN if a.system in TRAY else PUSH
+        push = pushes[(i // 3) % len(pushes)] if i % 3 == 0 else None
         await step(push, "play")
     record("end", slug=slug, sheet=snapshot(base, slug))
 

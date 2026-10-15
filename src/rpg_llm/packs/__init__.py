@@ -40,10 +40,12 @@ def enabled() -> list[dict]:
 def match(system: str) -> dict | None:
     """The pack for a game system name ("D&D 5e (2024 rules)", "Daggerheart"), if any."""
     s = f" {(system or '').lower()} "
-    for pack in enabled():
-        if any(re.search(rf"(?<![a-z0-9]){re.escape(m)}(?![a-z0-9])", s) for m in pack["matches"]):
-            return pack
-    return None
+    best, size = None, 0
+    for pack in enabled():  # the longest name matched wins: "Ironsworn: Starforged" is Starforged
+        for m in pack["matches"]:
+            if len(m) > size and re.search(rf"(?<![a-z0-9]){re.escape(m)}(?![a-z0-9])", s):
+                best, size = pack, len(m)
+    return best
 
 
 def for_campaign(meta: dict) -> dict | None:
@@ -59,7 +61,7 @@ def public(pack: dict | None) -> dict | None:
     if not pack:
         return None
     return {k: pack.get(k) for k in ("id", "name", "sheet", "resources", "hide_core", "currency",
-                                     "duality")}
+                                     "duality", "ironsworn", "legacy")}
 
 
 def picker_entries() -> list[dict]:
@@ -221,3 +223,76 @@ def great_weapon_dice(pack: dict | None, sh: dict | None) -> list[tuple[int, int
         if die:
             out.append((int(die[0]), int(die[1])))
     return out
+
+
+# ---- oracles (Ironsworn, Starforged: oracles.json, built by scripts/build_srd.py) -------------
+
+ORACLE_TOOL = {"type": "function", "function": {
+    "name": "ask_oracle",
+    "description": "Roll on one of the game's oracle tables, or ask the oracle a yes/no question, "
+                   "instead of inventing the answer: names, places, planets, characters' looks and "
+                   "goals, derelicts, twists, 'is anyone there?'. The app rolls d100 for real; build "
+                   "on what it gives. A table by name, e.g. 'Action', 'Theme', 'Descriptor', "
+                   "'Focus', 'Given Name', 'Settlement Name', 'Pay the Price', 'Planet: Desert "
+                   "World: Atmosphere'; or a yes/no question with odds.",
+    "parameters": {"type": "object", "properties": {
+        "table": {"type": "string", "description": "the oracle table's name (for a table roll)"},
+        "question": {"type": "string", "description": "a yes/no question (with odds)"},
+        "odds": {"type": "string", "enum": ["small chance", "unlikely", "50/50", "likely", "almost certain"]},
+    }}}}
+
+ODDS = {"small chance": 10, "unlikely": 25, "50/50": 50, "likely": 75, "almost certain": 90}
+
+
+@lru_cache
+def oracles(pack_id: str) -> list[dict]:
+    p = DIR / pack_id / "oracles.json"
+    return __import__("json").loads(p.read_text()) if p.exists() else []
+
+
+def find_oracle(pack_id: str, name: str) -> dict | None:
+    """The table a name means: the full path, its last part ('Action'), or most of its words."""
+    want = _words(name)
+    if not want:
+        return None
+    best, score = None, 0
+    for t in oracles(pack_id):
+        parts = [_words(x) for x in t["name"].split(" / ")]
+        words = set(w for p in parts for w in p)
+        s = 100 if parts[-1] == want else 50 if _words(t["name"]) == want else 0
+        s += sum(w in words or w.rstrip("s") in words for w in want) * 10 - len(words) * 0.1
+        s += sum(w in parts[-1] for w in want) * 3
+        if s > score:
+            best, score = t, s
+    return best if score >= 10 * len(want) * 0.6 else None
+
+
+def _match(n: int) -> bool:
+    return n == 100 or (n > 10 and n % 11 == 0)
+
+
+def ask_oracle(pack_id: str, args: dict) -> tuple[str, dict | None]:
+    """The oracle's answer for the GM, and a record of the roll for the page (None if there was
+    nothing to roll)."""
+    import secrets
+    n = secrets.randbelow(100) + 1
+    twist = " A match (both digits the same): an extreme result or a twist." if _match(n) else ""
+    if args.get("question") or (args.get("odds") and not args.get("table")):
+        odds = str(args.get("odds") or "50/50").lower()
+        need = ODDS.get(odds, 50)
+        answer = "Yes" if n <= need else "No"
+        q = str(args.get("question") or "").strip()
+        return (f"Ask the Oracle ({odds}, yes on {need} or less){': ' + q if q else ''}: rolled {n}: "
+                f"{answer}.{twist} Build on this answer.",
+                {"dice": "1D100", "reason": f"Oracle ({odds}): {q[:60]} → {answer}".strip(), "rolls": [n],
+                 "modifier": 0, "total": n, "sides": [100], "oracle": answer})
+    t = find_oracle(pack_id, str(args.get("table") or ""))
+    if not t:
+        return (f"No oracle table called {args.get('table')!r}. Try a shorter name (Action, Theme, "
+                f"Descriptor, Focus, Given Name...), look tables up with rules_lookup ('Oracle: ...'), or "
+                f"ask a yes/no question with odds.", None)
+    row = next((r for r in t["rows"] if r[0] <= n <= r[1]), None)
+    result = row[2] if row else "(nothing on that roll)"
+    return (f"Oracle {t['name']}: rolled {n}: {result}.{twist} Build on this; roll again for more.",
+            {"dice": "1D100", "reason": f"Oracle {t['name'].split(' / ')[-1]} → {result}"[:120],
+             "rolls": [n], "modifier": 0, "total": n, "sides": [100], "oracle": result})

@@ -64,6 +64,20 @@ RESOURCE_CHANGE = {
 }
 
 
+TRACKS_SCHEMA = {"type": "array", "items": {
+    "type": "object",
+    "properties": {"name": {"type": "string"},
+                   "kind": {"type": "string", "enum": ["vow", "expedition", "journey", "fight", "connection", "bond", "legacy", "other"]},
+                   "rank": {"type": "string", "enum": ["troublesome", "dangerous", "formidable", "extreme", "epic", "legacy"]}},
+    "required": ["name", "kind", "rank"], "additionalProperties": False}}
+PROGRESS_MARK = {
+    "type": "object",
+    "properties": {"track": {"type": "string"}, "marks": {"type": "integer"}, "ticks": {"type": "integer"}},
+    "required": ["track", "marks", "ticks"],
+    "additionalProperties": False,
+}
+
+
 def blank(pack: dict | None = None) -> dict:
     out = {k: ([] if k in LISTS else "") for k in FIELDS}
     if pack:  # a Rules-mode sheet: the system's own fields and counters, at their defaults
@@ -87,8 +101,16 @@ def clean_system(data: dict, pack: dict) -> dict:
         if f["type"] == "number":
             out[f["key"]] = _int(v)
         elif f["type"] == "list":
+            if isinstance(v, dict):  # {"Courier": 1, "Ace": 1}
+                v = [f"{k}: {x}" if x not in (None, "") else str(k) for k, x in v.items()]
+            elif isinstance(v, str) and ";" in v and not v.lstrip().startswith(("[", "{")):
+                v = v.split(";")  # "Courier: 1; Ace: 1": the list run together
             items = v if isinstance(v, list) else ([v] if v else [])
-            out[f["key"]] = [str(i).strip() for i in items if str(i).strip()][:20]
+            # the sheet is shown as YAML ("- 'Archer: Sure Aim'"): a model copying it keeps the quotes
+            items = [unquote(i) for i in items]
+            out[f["key"]] = [i for i in items if i][:20]
+        elif f["type"] == "tracks":
+            out[f["key"]] = clean_tracks(v, pack)
         elif f["type"] == "scores":
             got = v if isinstance(v, dict) else {}
             low = {str(k).lower()[:3]: val for k, val in got.items()}
@@ -96,6 +118,19 @@ def clean_system(data: dict, pack: dict) -> dict:
         else:
             out[f["key"]] = plain_text(v)[:300]
     return out
+
+
+def unquote(v) -> str:
+    """A value as the model copied it from the sheet's YAML: without the quotes around it and the
+    line-folding escapes ('"Veyra has short hair,\\  \\  and a scar"'), which otherwise pile up
+    a little more at every update."""
+    s = str(v if v is not None else "").strip()
+    if "\\" in s:
+        s = re.sub(r"(\s*\\(?=\s)\s*)+", " ", s)
+    s = re.sub(r"[ \t]*\n[ \t]+", " ", s)  # a folded line (indented): one line
+    while len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"" and s[0] not in s.strip(s[0]):
+        s = s.strip(s[0]).strip()
+    return s
 
 
 def plain_text(v) -> str:
@@ -114,7 +149,7 @@ def plain_text(v) -> str:
         return f"{name} ({rest})" if name and rest else name or rest
     if isinstance(v, list):
         return "; ".join(t for t in (plain_text(i) for i in v) if t)
-    return str(v if v is not None else "").strip()
+    return unquote(v)
 
 
 def clean_resources(items: list) -> list[dict]:
@@ -124,9 +159,10 @@ def clean_resources(items: list) -> list[dict]:
         if not isinstance(r, dict) or not str(r.get("name") or "").strip():
             continue
         mx = max(0, _int(r.get("max")))
+        mn = min(0, _int(r.get("min")))  # Momentum goes down to -6
         cur = _int(r.get("current", mx if not r.get("marks") else 0))
-        cur = max(0, min(cur, mx)) if mx else max(0, cur)
-        item = {"name": str(r["name"]).strip()[:40], "current": cur, "max": mx}
+        cur = max(mn, min(cur, mx)) if mx else max(mn, cur)
+        item = {"name": str(r["name"]).strip()[:40], "current": cur, "max": mx, **({"min": mn} if mn else {})}
         if r.get("marks"):
             item["marks"] = True
         out.append(item)
@@ -153,7 +189,8 @@ def apply_resources(resources: list[dict], changes: list[dict]) -> list[dict]:
         if ch.get("set") is not None:
             r["current"] = int(ch["set"])
         r["current"] += int(ch.get("change") or 0)
-        r["current"] = max(0, min(r["current"], r["max"])) if r["max"] else max(0, r["current"])
+        low = r.get("min", 0)
+        r["current"] = max(low, min(r["current"], r["max"])) if r["max"] else max(low, r["current"])
     return out
 
 
@@ -169,14 +206,16 @@ def clean(data: dict, pack: dict | None = None) -> dict:
         v = data.get(k)
         if k in LISTS:
             items = v if isinstance(v, list) else ([v] if v else [])
-            out[k] = [str(i).strip() for i in items if str(i).strip()]
+            out[k] = [t for t in (unquote(i) for i in items) if t]
         else:
-            out[k] = str(v or "").strip()
+            out[k] = unquote(v or "")
     if pack or data.get("system"):
         out["system"] = clean_system(data.get("system") or {}, pack) if pack else data["system"]
     if data.get("resources") or pack:
         out["resources"] = follow_pack(clean_resources(data.get("resources") or []), pack)
         follow_scores(out["resources"], out.get("system") or {}, pack)
+        if (pack or {}).get("ironsworn"):
+            follow_impacts(out["resources"], out.get("system") or {})
     return out
 
 
@@ -205,6 +244,192 @@ def follow_scores(resources: list[dict], system: dict, pack: dict | None, full: 
         elif r["max"] != v:
             r["current"] = max(0, min(v, r["current"] + v - r["max"]))
         r["max"] = v
+
+
+# ---- Ironsworn and Starforged: progress tracks, momentum and impacts --------------------------
+
+# ticks marked by one "mark progress", by rank (a track is 10 boxes of 4 ticks)
+RANKS = {"troublesome": 12, "dangerous": 8, "formidable": 4, "extreme": 2, "epic": 1}
+TRACK_KINDS = ("vow", "expedition", "journey", "fight", "connection", "bond", "legacy", "other")
+
+
+def track_from(v, pack: dict | None) -> dict | None:
+    """One progress track, {name, kind, rank, ticks}, from what a model or the page gave."""
+    if isinstance(v, str):
+        text = v.strip()
+        if not text:
+            return None
+        rank = next((r for r in RANKS if r in text.lower()), "dangerous")
+        kind = next((k for k in TRACK_KINDS if re.search(rf"\b{k}", text.lower())), "vow")
+        ticks = re.search(r"(\d+)\s*ticks?", text)
+        boxes = re.search(r"(\d+)\s*(?:/\s*10\s*)?box", text)
+        name = re.sub(r"\s*\([^)]*\)|\s*[-–:]\s*\d+.*$|^(vow|expedition|journey|fight|connection)\s*:\s*", "", text, flags=re.I)
+        v = {"name": name.strip() or text, "kind": kind, "rank": rank,
+             "ticks": int(ticks.group(1)) if ticks else int(boxes.group(1)) * 4 if boxes else 0}
+    if not isinstance(v, dict) or not str(v.get("name") or "").strip():
+        return None
+    name = str(v["name"]).strip()[:80]
+    legacy = {k.lower(): k for k in (pack or {}).get("legacy") or {}}
+    if name.lower() in legacy:
+        return {"name": legacy[name.lower()], "kind": "legacy", "rank": "legacy", "ticks": max(0, min(40, _int(v.get("ticks"))))}
+    rank = str(v.get("rank") or "").strip().lower()
+    kind = str(v.get("kind") or "").strip().lower()
+    return {"name": name, "kind": kind if kind in TRACK_KINDS and kind != "legacy" else "vow",
+            "rank": rank if rank in RANKS else "dangerous", "ticks": max(0, min(40, _int(v.get("ticks"))))}
+
+
+def clean_tracks(v, pack: dict | None) -> list[dict]:
+    """The progress tracks, the legacy tracks always among them (pack 'legacy')."""
+    items = v if isinstance(v, list) else ([v] if v else [])
+    out, seen = [], set()
+    for x in items:
+        t = track_from(x, pack)
+        if t and t["name"].lower() not in seen:
+            seen.add(t["name"].lower())
+            out.append(t)
+    for name in (pack or {}).get("legacy") or {}:
+        if name.lower() not in seen:
+            out.append({"name": name, "kind": "legacy", "rank": "legacy", "ticks": 0})
+    return out[:20]
+
+
+def find_track(tracks: list[dict], name: str) -> dict | None:
+    """The track a name means: exact, then the one sharing most of its words."""
+    key = str(name or "").strip().lower()
+    hit = next((t for t in tracks if t["name"].lower() == key), None)
+    if hit or not key:
+        return hit
+    words = set(re.findall(r"[a-z0-9]+", key)) - {"the", "a", "an", "of", "to", "my", "vow", "track"}
+    best, score = None, 0
+    for t in tracks:
+        tw = set(re.findall(r"[a-z0-9]+", t["name"].lower()))
+        n = len(words & tw)
+        if n > score:
+            best, score = t, n
+    return best if words and score >= max(1, len(words) // 2) else None
+
+
+def track_text(t: dict) -> str:
+    boxes, ticks = divmod(t["ticks"], 4)
+    filled = f"{boxes} box{'es' if boxes != 1 else ''}" + (f" + {ticks} tick{'s' if ticks != 1 else ''}" if ticks else "")
+    what = "legacy" if t["kind"] == "legacy" else f"{t['kind']}, {t['rank']}"
+    return f"{t['name']} ({what}): {filled} (progress score {boxes})"
+
+
+def merge_tracks(old: list[dict], new: list[dict], keep_ticks: bool = True) -> list[dict]:
+    """The model's list of tracks onto the sheet's: a track it still lists keeps its progress
+    (unless `keep_ticks` is off: session 0 sets them), a new one starts empty, one it dropped is
+    gone (fulfilled or forsaken), and the legacy tracks always stay as they were."""
+    out = []
+    for t in new:
+        was = find_track(old, t["name"])
+        if t["kind"] == "legacy":
+            t = dict(was) if was and keep_ticks else t
+        elif was and keep_ticks:
+            t = {**t, "name": was["name"], "ticks": was["ticks"]}
+        elif not was and keep_ticks:
+            t = {**t, "ticks": 0}
+        out.append(t)
+    names = {t["name"].lower() for t in out}
+    out += [dict(t) for t in old if t["kind"] == "legacy" and t["name"].lower() not in names]
+    return out
+
+
+def apply_progress(tracks: list[dict], marks: list[dict], legacy_xp: dict) -> tuple[list[dict], int, list[str]]:
+    """Progress marked this turn, worked out here: a mark is 12, 8, 4, 2 or 1 ticks by the
+    track's rank ('ticks' as given, for legacy rewards and clearing). Returns the tracks, the
+    experience earned (legacy boxes filled) and notes of what was marked."""
+    out = [dict(t) for t in tracks]
+    xp, notes = 0, []
+    for m in marks or []:
+        t = find_track(out, str(m.get("track") or ""))
+        if not t:
+            continue
+        n_marks, n_ticks = _int(m.get("marks")), _int(m.get("ticks"))
+        add = n_ticks + (n_marks * 4 if t["kind"] == "legacy" else n_marks * RANKS.get(t["rank"], 0))
+        before = t["ticks"]
+        t["ticks"] = max(0, min(40, before + add))
+        if t["ticks"] != before:
+            notes.append(f"{t['name']}: {track_text(t).split(': ', 1)[1]}")
+        if t["kind"] == "legacy":
+            xp += max(0, t["ticks"] // 4 - before // 4) * int(legacy_xp.get(t["name"], 0))
+    return out, xp, notes
+
+
+def track_counters(reported: list[dict], tracks: list[dict], names: set[str]) -> tuple[list[dict], list[dict]]:
+    """A track reported as a counter ("Bonds Track +1"): its change becomes ticks on the track,
+    and no counter is made of it. `names`: the counters the sheet has (lowercase)."""
+    keep, marks = [], []
+    for ch in reported or []:
+        name = str(ch.get("name") or "")
+        bare = re.sub(r"\b(track|progress)\b", "", name, flags=re.I).strip().lower()
+        t = None if name.lower() in names else next(
+            (t for t in tracks if t["name"].lower() == bare), None) or (
+            find_track(tracks, name) if re.search(r"track|progress|bond|vow", name, re.I) else None)
+        if not t:
+            keep.append(ch)
+        elif ch.get("set") is None and _int(ch.get("change")):
+            marks.append({"track": t["name"], "marks": 0, "ticks": _int(ch.get("change"))})
+    return keep, marks
+
+
+def progress_rolled(messages: list[dict]) -> set[str]:
+    """The tracks a progress roll was made on in these messages (Fulfill Your Vow, Reach Your
+    Destination): its outcome finishes or fails the track, it doesn't mark progress on it."""
+    return {r["challenge"]["track"].lower() for m in messages
+            for r in [*(m.get("rolls") or []), *([m["roll"]] if m.get("roll") else [])]
+            if (r.get("challenge") or {}).get("kind") == "progress" and r["challenge"].get("track")}
+
+
+METERS = ("health", "spirit", "supply", "integrity")
+
+
+def overflow_momentum(resources: list[dict], changes: list[dict]) -> list[dict]:
+    """Ironsworn: harm, stress or damage past 0 on a meter comes off momentum instead (Endure
+    Harm, Endure Stress, Sacrifice Resources, Withstand Damage), unless the model already took
+    momentum off for it."""
+    if any(str(ch.get("name") or "").lower() == "momentum" and _int(ch.get("change")) < 0 for ch in changes):
+        return []
+    now = {r["name"].lower(): r["current"] for r in resources}
+    total = 0
+    for meter in METERS:
+        if meter not in now:
+            continue
+        v = now[meter]
+        for ch in changes:
+            if str(ch.get("name") or "").lower() != meter:
+                continue
+            v = _int(ch["set"]) if ch.get("set") is not None else v
+            v += _int(ch.get("change"))
+            if v < 0:
+                total += -v
+                v = 0
+            v = min(v, next(r["max"] for r in resources if r["name"].lower() == meter) or v)
+    return [{"name": "Momentum", "change": -total, "set": None, "max": None}] if total else []
+
+
+def impacts_of(system: dict) -> list[str]:
+    return [str(x).strip().lower() for x in system.get("impacts") or [] if str(x).strip()]
+
+
+def momentum_reset(system: dict) -> int:
+    n = len(impacts_of(system))
+    return 2 if n == 0 else 1 if n == 1 else 0
+
+
+def follow_impacts(resources: list[dict], system: dict) -> None:
+    """Momentum: max +10 less one per impact, never below -6."""
+    for r in resources:
+        if r["name"].lower() == "momentum":
+            r["max"], r["min"] = max(0, 10 - len(impacts_of(system))), -6
+            r["current"] = max(-6, min(r["current"], r["max"]))
+
+
+def blocked(pack: dict | None, system: dict) -> set[str]:
+    """Meters that can't be raised: wounded stops health, shaken spirit, and so on."""
+    marked = impacts_of(system)
+    return {meter.lower() for meter, imp in ((pack or {}).get("blocks_recovery") or {}).items()
+            if any(m.startswith(imp) for m in marked)}
 
 
 def keep_scores(current: dict, sh: dict, pack: dict | None, damage: bool = True) -> None:
@@ -258,7 +483,7 @@ def update_schema(pack: dict | None) -> dict:
     if pack:
         props = {}
         for f in pack.get("sheet") or []:
-            props[f["key"]] = ({"type": "integer"} if f["type"] == "number" else
+            props[f["key"]] = (TRACKS_SCHEMA if f["type"] == "tracks" else {"type": "integer"} if f["type"] == "number" else
                                {"type": "array", "items": {"type": "string"}} if f["type"] == "list" else
                                {"type": "object", "properties": {n: {"type": "integer"} for n in f["names"]},
                                 "required": f["names"], "additionalProperties": False}
@@ -268,10 +493,12 @@ def update_schema(pack: dict | None) -> dict:
                                        "system": {"type": "object", "properties": props,
                                                   "required": list(props), "additionalProperties": False}},
                         "required": [*SHEET_SCHEMA["required"], "system"]}
+    tracks = any(f["type"] == "tracks" for f in (pack or {}).get("sheet") or [])
     return {**UPDATE_SCHEMA,
             "properties": {**UPDATE_SCHEMA["properties"], "sheet": sheet_schema,
-                           "resources": {"type": "array", "items": RESOURCE_CHANGE}},
-            "required": [*UPDATE_SCHEMA["required"], "resources"]}
+                           "resources": {"type": "array", "items": RESOURCE_CHANGE},
+                           **({"progress": {"type": "array", "items": PROGRESS_MARK}} if tracks else {})},
+            "required": [*UPDATE_SCHEMA["required"], "resources", *(["progress"] if tracks else [])]}
 
 
 def system_text(pack: dict | None, current: dict | None) -> str:
@@ -286,15 +513,35 @@ def system_text(pack: dict | None, current: dict | None) -> str:
     hp = next((r for r in res if r["name"].lower() == "hit points"), None)
     damage = ("damage marks 2 Hit Points: Hit Points +2; a rest clears 1: Hit Points -1"
               if hp and hp.get("marks") else (pack or {}).get("damage_example") or "damage taken: Hit Points -8")
+    examples = damage if (pack or {}).get("ironsworn") else damage + "; 1 Hope spent: Hope -1; Stress marked: Stress +1"
     out.append("Counters (" + (resources_text(res) or "none yet") + ") are changed only through "
-               "\"resources\": [{name, change, set, max}]: change is +/- (" + damage + "; 1 Hope "
-               "spent: Hope -1; Stress marked: Stress +1), set/max only to set a value outright "
-               "(null otherwise). Don't do the arithmetic, and leave the sheet's own counter list "
-               "as it is.")
+               "\"resources\": [{name, change, set, max}]: change is +/- (" + examples + "), set/max "
+               "only to set a value outright (null otherwise). Don't do the arithmetic, and leave the "
+               "sheet's own counter list as it is.")
     if marked:
         out.append(f"{', '.join(marked)} count marks: marking one is +1, clearing one is -1.")
     if pack and pack.get("sheet_rules"):
         out.append(pack["sheet_rules"].strip())
+    if pack and pack.get("hide_core"):
+        out.append(f"Not used in this game: {', '.join(pack['hide_core'])} (leave them empty).")
+    if pack and any(f["type"] == "tracks" for f in pack.get("sheet") or []):
+        legacy = pack.get("legacy") or {}
+        out.append("Progress tracks: list every track in system.tracks ({name, kind, rank}); a new "
+                   "vow, expedition, fight or connection is added there, and one fulfilled, forsaken "
+                   "or finished is left out. Progress is never written on the tracks: report it in "
+                   "\"progress\": [{track, marks, ticks}]. \"Mark progress\" once is marks 1 (twice: "
+                   "marks 2; the app works out the ticks by the rank); ticks are for exact amounts "
+                   "(a legacy reward: 1 box = 4 ticks; clearing progress: negative), and boxes the "
+                   "GM counts out (\"mark 2 boxes\") are ticks too: 4 a box. A track is never a "
+                   "counter in resources. A progress roll (Fulfill Your Vow, Reach Your Destination, "
+                   "End the Fight) marks no progress on its own track: its outcome ends the track "
+                   "(left out of tracks) or, on a miss, goes as the move says. A hit on a foe "
+                   "(Strike, Clash) marks progress on that foe's fight track, never a vow or journey "
+                   "named after it; a foe with no track yet gets one now (kind fight, the GM's rank, "
+                   "else dangerous). "
+                   + (f"The legacy tracks ({', '.join(legacy)}) are always there. " if legacy else "")
+                   + ("Experience from filled legacy boxes is added automatically: don't report it."
+                      if any(legacy.values()) else ""))
     if pack and pack.get("duality"):
         out.append("The Hope and Fear a Duality roll itself gives (with Hope: Hope +1; with Fear: "
                    "GM Fear +1; a critical: Hope +1 and Stress -1) are added automatically: don't "
@@ -419,9 +666,10 @@ def notes_block(sheet: dict | None, pack: dict | None = None) -> str:
     if not sheet:
         return ""
     lines = [f"## Character sheet (current; keep to it)"]
+    unused = set((pack or {}).get("hide_core") or []) - {"skills"}  # skills: still worth showing if any
     for k in FIELDS:
         v = sheet.get(k)
-        if not v:
+        if not v or k in unused:
             continue
         label = k.replace("_", " ").capitalize()
         lines.append(f"{label}: {'; '.join(v) if isinstance(v, list) else v}")
@@ -430,7 +678,9 @@ def notes_block(sheet: dict | None, pack: dict | None = None) -> str:
         if v in ("", 0, [], None) or (isinstance(v, dict) and not any(v.values())):
             continue
         mods = next((f.get("mods") for f in (pack or {}).get("sheet") or [] if f["key"] == k), None)
-        if isinstance(v, list):
+        if isinstance(v, list) and v and isinstance(v[0], dict):
+            shown = "; ".join(track_text(t) for t in v)
+        elif isinstance(v, list):
             shown = "; ".join(v)
         elif isinstance(v, dict) and mods == "plain":
             shown = ", ".join(f"{n} {x:+d}" for n, x in v.items())
@@ -443,6 +693,10 @@ def notes_block(sheet: dict | None, pack: dict | None = None) -> str:
         lines.append(f"{labels.get(k, k)}: {shown}")
     if sheet.get("resources"):
         lines.append(f"Counters: {resources_text(sheet['resources'])}")
+    if (pack or {}).get("ironsworn"):
+        system = sheet.get("system") or {}
+        lines.append(f"Momentum reset: {momentum_reset(system):+d}" + (
+            f"; can't be raised now: {', '.join(sorted(blocked(pack, system)))}" if blocked(pack, system) else ""))
     return "\n".join(lines)
 
 
@@ -505,7 +759,7 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     earlier = (f"\nPrevious exchange (already on the sheet; context only, don't apply it again):\n"
                f"{fmt(messages[max(0, start - 2):start])}\n" if start >= 2 else "")
     task = prompts.SHEET_TASK.format(
-        sheet=yaml.safe_dump(current, sort_keys=False, allow_unicode=True) if current
+        sheet=yaml.safe_dump(current, sort_keys=False, allow_unicode=True, width=10**6) if current
         else "(no sheet yet: create it from the brief and this exchange)",
         exchange=exchange, earlier=earlier, system=system_text(pack, current))
     system = SYSTEM if current else f"{SYSTEM}\n\nCampaign brief:\n{campaign.brief.strip()}"
@@ -514,11 +768,31 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
     money_talk = bool(MONEY_WORDS.search(exchange))
     auto = duality_changes(messages[start:]) if pack and pack.get("duality") else []
     waiting_damage = pending_damage(messages[-1])
+    rolled = progress_rolled(messages[start:])
 
     def read(res: dict) -> dict:
         sh = clean(res.get("sheet") or {}, pack)
+        earned, marked = [], []
+        reported = res.get("resources")
+        if current and pack and "tracks" in (current.get("system") or {}):
+            tracks = merge_tracks(current["system"]["tracks"], sh["system"].get("tracks") or [])
+            reported, ticks = track_counters(reported, tracks, {r["name"].lower() for r in current.get("resources") or []})
+            marks = [m for m in res.get("progress") or [] if (_int(m.get("marks")) <= 0 and _int(m.get("ticks")) <= 0)
+                     or (find_track(tracks, str(m.get("track") or "")) or {}).get("name", "").lower() not in rolled]
+            tracks, xp, marked = apply_progress(tracks, marks + ticks, pack.get("legacy") or {})
+            sh["system"]["tracks"] = tracks
+            if xp:
+                earned = [{"name": "Experience", "change": xp, "set": None, "max": None}]
+        res["_marked"] = marked
         if current:  # counters: changes applied here, never the model's own list
-            reported = without_duality(res.get("resources"), auto) if auto else res.get("resources")
+            reported = without_duality(reported, auto) if auto else reported
+            stuck = blocked(pack, sh.get("system") or {})
+            if stuck:  # wounded: health can't rise (and so on)
+                reported = [ch for ch in reported or [] if str(ch.get("name") or "").lower() not in stuck
+                            or (_int(ch.get("change")) <= 0 and ch.get("set") is None)]
+            reported = (reported or []) + earned
+            if (pack or {}).get("ironsworn"):
+                reported += overflow_momentum(current.get("resources") or [], reported)
             if waiting_damage:  # "roll 2D6-5 damage": taken when it's rolled, not guessed now
                 now = {r["name"].lower(): r["current"] for r in current.get("resources") or []}
                 reported = [ch for ch in reported or [] if _int(ch.get("change")) >= 0 and (
@@ -555,11 +829,15 @@ async def update(campaign: Campaign, router: LLMClient, router_system: str = "")
             if refused else None)
     if auto and current is not None and new.get("resources") != current.get("resources"):
         result["changed"] = True  # the roll's Hope or Fear, even if the model saw nothing else
+    if result.get("_marked"):
+        result["changed"] = True
     if current is not None and (not result.get("changed") or new == current):
         return {"changes": [flag], "refused": refused, "money": current["money"]} if refused else None
     if not new.get("name") and current is None:
         return None  # nothing usable yet
     changes = tidy_changes(result.get("changes") or [])
+    if result.get("_marked"):  # the progress as worked out here, not the model's own note of it
+        changes = [c for c in changes if "progress" not in c.lower()] + [f"Progress: {n}" for n in result["_marked"]]
     if auto:  # the model's own note of the roll's Hope would say it twice
         changes = [c for c in changes if not re.search(r"\b(gain|gained|gains)\b.*\bhope\b", c, re.I)]
         changes.insert(0, roll_note(auto))

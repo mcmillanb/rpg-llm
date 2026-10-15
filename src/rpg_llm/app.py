@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -307,6 +308,49 @@ def roll_floor(c: Campaign, dice_text: str, reason: str) -> int:
     return 3 if dice.great_weapon(dice_text, reason, weapons) else 0
 
 
+_STAT_WORDS = r"edge|heart|iron|shadow|wits|health|spirit|supply|integrity"
+
+
+_PROGRESS_MOVES = (r"fulfill your vow|finish an expedition|forge a bond|take decisive action|reach your destination|"
+                   r"end the fight|write your epilogue")
+
+
+def with_stats(c: Campaign, dice_text: str, reason: str = "") -> str:
+    """Ironsworn: the stats and meters named in dice ('1D6+iron+1') as the sheet's numbers; a
+    progress move (named first in `reason`) asked for as an action roll is a progress roll."""
+    if not (packs.for_campaign(c.meta) or {}).get("ironsworn"):
+        return dice_text
+    if re.match(rf"\W*(?:roll\s+(?:to|for)\s+)?(?:{_PROGRESS_MOVES})\b", reason, re.I) and \
+            re.fullmatch(r"\s*1\s*d\s*6\b.*", dice_text, re.I):
+        return "PROGRESS"
+    if not re.search(_STAT_WORDS, dice_text, re.I):
+        return dice_text
+    sh = sheet.load(c) or {}
+    values = {k.lower(): v for k, v in ((sh.get("system") or {}).get("stats") or {}).items()}
+    values.update({r["name"].lower(): r["current"] for r in sh.get("resources") or []})
+    return re.sub(rf"\b({_STAT_WORDS})\b", lambda m: str(values.get(m.group(1).lower(), 0)), dice_text, flags=re.I)
+
+
+def ironsworn_args(c: Campaign, dice_text: str, reason: str) -> dict | None:
+    """Ironsworn and Starforged rolls: the player's momentum and its reset (what burning it would
+    do), and for a progress roll the score of the track the reason names."""
+    if not (packs.for_campaign(c.meta) or {}).get("ironsworn"):
+        return None
+    sh = sheet.load(c) or {}
+    system = sh.get("system") or {}
+    mom = next((r["current"] for r in sh.get("resources") or [] if r["name"].lower() == "momentum"), None)
+    out = {"momentum": mom, "reset": sheet.momentum_reset(system)}
+    if dice.progress_notation(dice_text):  # the sheet's track, when one matches, over the GM's number
+        tracks = system.get("tracks") or []
+        words = re.sub(rf"^(?:roll\s+(?:to|for)\s+)?(?:{_PROGRESS_MOVES})\s*[:,-]?\s*", "", reason, flags=re.I)
+        t = sheet.find_track(tracks, words) or sheet.find_track(tracks, reason)
+        if t is None and len([x for x in tracks if x["kind"] != "legacy"]) == 1:
+            t = next(x for x in tracks if x["kind"] != "legacy")  # only one track it can be
+        if t:
+            out.update(progress=t["ticks"] // 4, track=t["name"])
+    return out
+
+
 def sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -358,6 +402,9 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
     lookup_ok = packs.has_reference(pack) and (packs.rules_mode(c.meta) or pack.get("primer_in_story"))
     if lookup_ok:
         tools.append(packs.LOOKUP_TOOL)
+    oracle_ok = bool(pack and pack.get("ironsworn") and packs.oracles(pack["id"]))
+    if oracle_ok:
+        tools.append(packs.ORACLE_TOOL)
     if mode == "auto":
         tools.append(dice.TOOL)
     elif mode == "virtual":
@@ -428,6 +475,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
                     rargs = json.loads(tc["arguments"] or "{}")
                     if in_session0:
                         rargs["dice"] = session0.fix_dice(c.meta, str(rargs.get("dice", "")))
+                    rargs["dice"] = with_stats(c, str(rargs.get("dice", "")), str(rargs.get("prompt", "")))
                     requested = dice.request(rargs, dice.roll_under_system(c.meta.get("system") or ""))
                     yield sse({"type": "roll_request", **requested})
                     break
@@ -436,15 +484,26 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
             elif tc["name"] == "roll_dice":
                 try:
                     args = json.loads(tc["arguments"] or "{}")
+                    args["dice"] = with_stats(c, str(args.get("dice", "")), str(args.get("reason", "")))
                     r = dice.roll(str(args.get("dice", "")), str(args.get("reason", "")),
                                   args.get("target"), args.get("success_if") or "at_least",
                                   duality=duality, floor=roll_floor(c, str(args.get("dice", "")),
-                                                                    str(args.get("reason", ""))))
+                                                                    str(args.get("reason", ""))),
+                                  ironsworn=ironsworn_args(c, str(args.get("dice", "")), str(args.get("reason", ""))))
                     rolls.append(r)
                     result = dice.describe(r)
                     yield sse({"type": "roll", **r})
                 except (ValueError, TypeError, json.JSONDecodeError) as e:
                     result = f"Error: {e}"
+            elif tc["name"] == "ask_oracle" and oracle_ok:
+                try:
+                    oargs = json.loads(tc["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    oargs = {}
+                result, rec = packs.ask_oracle(pack["id"], oargs)
+                if rec:
+                    rolls.append(rec)
+                    yield sse({"type": "roll", **rec})
             elif tc["name"] == "rules_lookup" and lookup_ok:
                 try:
                     q = str(json.loads(tc["arguments"] or "{}").get("query", ""))
@@ -493,7 +552,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
         if pasted:  # the GM wrote the tool call as text: make it real, drop the stray line
             requested, entry["content"] = pasted
         else:
-            requested = dice.request_from_text(content, f"{user['id']}")
+            requested = dice.request_from_text(content, f"{user['id']}") or \
+                stat_request(c, content, f"{user['id']}")
         ask = None if requested else dice.asked_roll(content)
         if ask:  # asked in words only: have the GM fill in the request, else the usual roll
             yield sse({"type": "status", "text": "setting up the dice…"})
@@ -631,6 +691,19 @@ def can_rewind(c: Campaign) -> bool:
     return bool(c.meta.get("allow_rewind"))
 
 
+def stat_request(c: Campaign, text: str, key: str) -> dict | None:
+    """Ironsworn: a move's roll asked for in words ('Face Danger: roll +edge'), the stat's number in."""
+    pack = packs.for_campaign(c.meta) or {}
+    if not pack.get("ironsworn"):
+        return None
+    moves = [e["title"] for e in packs.reference(pack["id"]) if e["category"] == "moves"]
+    req = dice.stat_request(text, key, moves)
+    if not req:
+        return None
+    rolled = with_stats(c, req["dice"], req["prompt"])
+    return {**req, "dice": rolled if rolled == "PROGRESS" else dice.canon(rolled)}
+
+
 def pending_roll(c: Campaign, msgs: list[dict]) -> dict | None:
     """The roll the last GM reply is waiting for, if any, including one the GM only wrote as
     text in an on-screen-dice campaign."""
@@ -645,6 +718,9 @@ def pending_roll(c: Campaign, msgs: list[dict]) -> dict | None:
         if pasted:
             return pasted[0]
         req = dice.request_from_text(text, str(last["id"]))
+        if req:
+            return req
+        req = stat_request(c, text, str(last["id"]))
         if req:
             return req
         copied = dice.copied_roll_line(text)
@@ -961,6 +1037,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         return {"slug": c.slug, "meta": c.meta, "can_rewind": can_rewind(c),
                 "session0": session0.active(c.meta),
                 "duality": bool((packs.for_campaign(c.meta) or {}).get("duality")),
+                "ironsworn": bool((packs.for_campaign(c.meta) or {}).get("ironsworn")),
                 "table": context.table(c.meta),
                 "portrait": portrait.current(c),
                 "show_details": bool(c.meta.get("show_details")),
@@ -1145,7 +1222,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(409, "That roll isn't waiting any more.")
         r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"),
                       duality=bool((packs.for_campaign(c.meta) or {}).get("duality")),
-                      floor=roll_floor(c, req["dice"], req["prompt"]))
+                      floor=roll_floor(c, req["dice"], req["prompt"]),
+                      ironsworn=ironsworn_args(c, req["dice"], req["prompt"]))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})
         return stream_turn(rt, c, first={"type": "rolled", "roll": r, "message": entry})
 
@@ -1159,7 +1237,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         try:
             r = dice.roll(body.dice, body.reason.strip()[:120],
                           duality=bool((packs.for_campaign(c.meta) or {}).get("duality")),
-                          floor=roll_floor(c, body.dice, body.reason))
+                          floor=roll_floor(c, body.dice, body.reason),
+                          ironsworn=ironsworn_args(c, body.dice, body.reason))
         except ValueError as e:
             raise HTTPException(400, str(e))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})

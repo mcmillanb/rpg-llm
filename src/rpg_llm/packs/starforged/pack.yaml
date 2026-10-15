@@ -1,0 +1,47 @@
+id: starforged
+name: "Ironsworn: Starforged"
+genre: Science fiction
+blurb: "Space adventure built for solo play: swear iron vows, explore the Forge, and let the oracles surprise you."
+# matched against the campaign's game system (lower case, whole words); the longest match wins,
+# so "Ironsworn: Starforged" is this pack, not Ironsworn
+matches: ["starforged", "ironsworn: starforged", "ironsworn starforged"]
+theme: scifi
+# no money: supply stands for it
+start_money: "none (supply)"
+hide_core: [skills, money, loans, assets]
+# the action and progress rolls, momentum, progress tracks and the oracles (sheet.py, dice.py)
+ironsworn: true
+check: 1D6
+primer_in_story: true
+# session 0 can't finish while any of these is empty
+required: [stats, asset_cards, tracks]
+sheet:
+  - {key: stats, label: Stats, type: scores, names: [Edge, Heart, Iron, Shadow, Wits], mods: plain}
+  - {key: asset_cards, label: "Assets (name: abilities marked, e.g. 'Ace: 1')", type: list}
+  - {key: impacts, label: Impacts, type: list}
+  - {key: tracks, label: "Progress tracks (vows, expeditions, fights, connections)", type: tracks}
+  - {key: starship, label: "Starship (name, history, quirk)", type: text}
+  - {key: truths, label: Setting truths, type: list}
+# words a GM uses for these fields
+aliases: {assets: asset_cards, paths: asset_cards, debilities: impacts, vows: tracks, progress: tracks, progress_tracks: tracks, ship: starship}
+resources:
+  - {name: Health, max: 5, current: 5}
+  - {name: Spirit, max: 5, current: 5}
+  - {name: Supply, max: 5, current: 5}
+  - {name: Momentum, max: 10, current: 2, min: -6}
+  - {name: Integrity, max: 5, current: 5}
+  - {name: Experience, max: 0, current: 0}
+# the legacy tracks, always on the sheet: each box filled gives this much experience
+legacy: {Quests: 2, Bonds: 2, Discoveries: 2}
+# while one of these impacts is marked, the meter can't be raised
+blocks_recovery: {Health: wounded, Spirit: shaken, Supply: unprepared, Integrity: battered}
+damage_example: "serious harm: Health -2; Lose Momentum (-2): Momentum -2; burning momentum: Momentum set to the reset"
+checks: {asset_cards: assets, impacts: impacts}
+explain: {asset_cards: assets}
+sheet_rules: >-
+  Follow the move's outcome exactly: "take +1 momentum" is Momentum +1, "suffer -2 health" is
+  Health -2 (all of it, even at 0: the app takes what's past 0 off momentum), "Sacrifice Resources (-1)" is Supply -1, "mark progress" goes in "progress" (never
+  in resources). Burning momentum resets it: Momentum set to the reset value. Marking an impact
+  (wounded, shaken, battered...) adds it to impacts; clearing one (Heal on a hit clears wounded)
+  removes it. Spending experience on Advance: Experience -3 for a new asset, -2 for another
+  ability; the asset goes in asset_cards as "Name: abilities marked" ("Ace: 1, 2").

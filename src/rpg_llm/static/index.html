@@ -242,6 +242,18 @@ label.check { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 .outcome { font: 600 12px system-ui, sans-serif; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
 .outcome.hope { color: #9a7413; border-color: #c9a227; } .outcome.fear { color: #6b3f98; border-color: #7b4fa8; }
 .outcome.critical { color: #2f8a45; border-color: #2f8a45; }
+.dual.action small { color: var(--muted); } .dual.challenge small { color: #5b6b8a; }
+.dual.challenge .die polygon { stroke: #5b6b8a; }
+.outcome.strong { color: #2f8a45; border-color: #2f8a45; } .outcome.weak { color: #9a7413; border-color: #c9a227; }
+.outcome.miss { color: #a33; border-color: #c55; } .outcome.match { color: #6b3f98; border-color: #7b4fa8; }
+.tracks { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.track { border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+.track .trow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.track .trow input[data-tname] { flex: 1 1 10em; min-width: 0; }
+.track select, .track input[type=number] { width: auto; }
+.boxes { display: flex; gap: 3px; margin-top: 5px; }
+.boxes span { width: 18px; height: 18px; border: 1px solid var(--line); border-radius: 3px; font: 600 11px/18px system-ui, sans-serif; text-align: center; color: var(--muted); }
+.boxes span.full { background: var(--muted); }
 .scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
 .scores div { border: 1px solid var(--line); border-radius: 10px; padding: 6px; text-align: center; }
 .scores label { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
@@ -889,15 +901,28 @@ function diceList(notation) {
 }
 // Daggerheart: the first two d12s are the Hope die and the Fear die
 function isDuality(notation) { return !!S.data?.duality && /^2D12/i.test(notation || ""); }
-function facesHTML(sides, values, kept, duality) {
+// Ironsworn: an action roll is the action die and two challenge dice; a progress roll just the two
+function isChallenge(notation) { return !!S.data?.ironsworn && (/^1?D6([+-]\d+)*$/i.test(notation || "") || /^PROGRESS/i.test(notation || "")); }
+function rollDiceList(notation) {
+  if (!isChallenge(notation)) return diceList(notation);
+  return /^PROGRESS/i.test(notation) ? [10, 10] : [6, 10, 10];
+}
+function facesHTML(sides, values, kept, duality, challenge) {
   return sides.map((sd, i) => {
     let die = dieSVG(sd, values ? values[i] : undefined);
     if (kept && kept[i] === false) die = die.replace('class="die"', 'class="die dropped"');
     if (duality && i < 2) return `<span class="dual ${i ? "fear" : "hope"}">${die}<small>${i ? "Fear" : "Hope"}</small></span>`;
+    if (challenge) return `<span class="dual ${sd === 6 ? "action" : "challenge"}">${die}<small>${sd === 6 ? "action" : "challenge"}</small></span>`;
     return die;
   }).join("");
 }
+function challengeHTML(r) {
+  const ch = r.challenge;
+  const cls = ch.outcome === "strong hit" ? "strong" : ch.outcome === "weak hit" ? "weak" : "miss";
+  return `<span class="outcome ${cls}">${ch.outcome}</span>${ch.match ? ' <span class="outcome match">match!</span>' : ""}${ch.burn ? ` <span class="muted small">(burn momentum ${ch.burn.momentum > 0 ? "+" : ""}${ch.burn.momentum}: ${ch.burn.outcome})</span>` : ""}`;
+}
 function outcomeHTML(r) {
+  if (r.challenge) return challengeHTML(r);
   if (!r.duality) return "";
   const o = r.duality.outcome;
   return `<span class="outcome ${o === "critical" ? "critical" : o === "with Hope" ? "hope" : "fear"}">${o === "critical" ? "critical!" : o}</span>`;
@@ -910,11 +935,17 @@ function rollRequestHTML(req, live) {
   return `<div class="rollreq ${live ? "live" : ""}" data-roll="${esc(req.id)}">
     <div class="rq-title">🎲 ${esc(req.prompt)}</div>
     <div class="muted">${esc(req.dice)}${needText(req) ? " · " + needText(req) : ""}${live ? "" : " · rolled"}</div>
-    <div class="rq-dice">${facesHTML(shown, null, null, isDuality(req.dice))}${all.length > shown.length ? `<span class="muted">+${all.length - shown.length} more</span>` : ""}
+    <div class="rq-dice">${isChallenge(req.dice) ? facesHTML(rollDiceList(req.dice), null, null, false, true) : facesHTML(shown, null, null, isDuality(req.dice))}${all.length > shown.length ? `<span class="muted">+${all.length - shown.length} more</span>` : ""}
       ${live ? `<button class="primary" data-act="roll">🎲 Roll</button>` : ""}</div>
   </div>`;
 }
 function rolledHTML(r) {
+  if (r.challenge) {
+    const ch = r.challenge;
+    const score = ch.kind === "progress" ? `progress <strong>${ch.score}</strong>${ch.track ? ` <span class="muted">(${esc(ch.track)})</span>` : ""}`
+      : `${r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : ""} = <strong>${ch.score}</strong>`;
+    return `<div class="rolled">🎲 <strong>${esc(r.reason || "Roll")}</strong> ${facesHTML(r.sides.slice(0, ch.kind === "progress" ? 0 : 1), r.rolls.slice(0, ch.kind === "progress" ? 0 : 1), null, false, true)}${score} vs ${facesHTML([10, 10], ch.challenge, null, false, true)} ${challengeHTML(r)}</div>`;
+  }
   const sides = r.sides || diceList(r.dice);
   const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
   const res = "success" in r ? `<span class="res ${r.success ? "ok" : "fail"}">${r.success ? "✓ success" : "✗ failure"}</span>` : "";
@@ -1166,11 +1197,11 @@ function send() {
 }
 // ---- the player rolls the GM's requested dice ------------------------------------------
 // The tumble across the screen: land(r) settles the dice on the result, cancel() clears them.
-function diceFly(sidesList, duality = false) {  // sidesList: [12, 12, 6]
+function diceFly(sidesList, duality = false, challenge = false) {  // sidesList: [12, 12, 6]
   const shown = sidesList.slice(0, 8);
   const fly = document.createElement("div");
   fly.className = "dicefly";
-  fly.innerHTML = `<div class="row">${facesHTML(shown, null, null, duality).replace(/class="die"/g, () => `class="die" style="animation-delay:${Math.random() * 200 | 0}ms"`)}</div><div class="banner"></div>`;
+  fly.innerHTML = `<div class="row">${facesHTML(shown, null, null, duality, challenge).replace(/class="die"/g, () => `class="die" style="animation-delay:${Math.random() * 200 | 0}ms"`)}</div><div class="banner"></div>`;
   document.body.appendChild(fly);
   const faces = [...fly.querySelectorAll(".die text")];
   const flicker = setInterval(() => faces.forEach((t, i) => t.textContent = 1 + Math.floor(Math.random() * shown[i])), 70);
@@ -1185,6 +1216,13 @@ function diceFly(sidesList, duality = false) {  // sidesList: [12, 12, 6]
         if (r.kept) fly.querySelectorAll(".die").forEach((el, i) => r.kept[i] === false && el.classList.add("dropped"));
         const banner = fly.querySelector(".banner");
         const mod = r.modifier ? ` ${r.modifier > 0 ? "+" : "−"} ${Math.abs(r.modifier)}` : "";
+        if (r.challenge) {
+          const ch = r.challenge;
+          banner.textContent = `${ch.score} vs ${ch.challenge.join(", ")} · ${ch.outcome}${ch.match ? " · match!" : ""}`;
+          banner.classList.add("show", ch.outcome === "miss" ? "fail" : "ok");
+          setTimeout(() => { fly.classList.add("fade"); setTimeout(() => fly.remove(), 600); }, 2200);
+          return;
+        }
         banner.textContent = `${r.rolls.length > 1 || r.modifier ? rollsText(r) + mod + " = " : ""}${r.total}` +
           ("success" in r ? (r.success ? "  ✓ success" : "  ✗ failure") : "") +
           (r.duality ? `  · ${r.duality.outcome === "critical" ? "critical!" : r.duality.outcome}` : "");
@@ -1200,7 +1238,7 @@ function rollDice(id) {
   const last = S.data.messages[S.data.messages.length - 1];
   const req = last?.roll_request;
   if (!req || req.id !== id) return;
-  const fly = diceFly(diceList(req.dice), isDuality(req.dice));
+  const fly = diceFly(rollDiceList(req.dice), isDuality(req.dice), isChallenge(req.dice));
   runTurn(`/api/campaigns/${S.slug}/roll`, { id }, `🎲 ${req.prompt}…`, "roll", { rolled: (e) => fly.land(e.roll) })
     .finally(() => fly.cancel());
 }
@@ -1472,15 +1510,48 @@ function systemFieldsHTML(pack, sys) {
       const x = (v || {})[n] ?? 0;
       return `<div><label>${esc(n)}</label><input type="number" data-sys="${f.key}" data-score="${esc(n)}" data-mods="${f.mods || ""}" value="${x}">${f.mods === "dnd" || f.mods === "traveller" ? `<div class="mod">${modText(x, f.mods)}</div>` : ""}</div>`;
     }).join("")}</div>`;
+    if (f.type === "tracks") return `<label>${esc(f.label)}</label>${tracksHTML(f.key, v || [])}`;
     if (f.type === "list") return `<label>${esc(f.label)} <span class="muted">(one per line)</span></label><textarea data-sys="${f.key}" rows="${Math.max(2, (v || []).length + 1)}">${esc((v || []).join("\n"))}</textarea>`;
     return `<label>${esc(f.label)}</label><input data-sys="${f.key}" ${f.type === "number" ? 'type="number"' : ""} value="${esc(v ?? "")}">`;
   }).join("");
+}
+const RANKS = ["troublesome", "dangerous", "formidable", "extreme", "epic"];
+const KINDS = ["vow", "expedition", "journey", "fight", "connection", "bond", "other"];
+function boxesHTML(ticks) {
+  const glyph = ["", "╱", "✕", "✱", ""];
+  return `<div class="boxes">${Array.from({ length: 10 }, (_, i) => {
+    const t = Math.max(0, Math.min(4, ticks - i * 4));
+    return `<span class="${t === 4 ? "full" : ""}">${glyph[t]}</span>`;
+  }).join("")}</div>`;
+}
+// each track: its name, kind and rank (a legacy track's are fixed), its ticks, and the ten boxes;
+// a blank row at the end adds one, and clearing a name removes it
+function tracksHTML(key, tracks) {
+  const row = (t, i) => {
+    const legacy = t.kind === "legacy";
+    return `<div class="track" data-track="${key}" data-i="${i}">
+      <div class="trow">${legacy ? `<strong>${esc(t.name)}</strong> <span class="muted small">legacy</span><input type="hidden" data-tname value="${esc(t.name)}">`
+        : `<input data-tname placeholder="${t.name ? "" : "New vow, expedition, fight…"}" value="${esc(t.name || "")}">
+        <select data-tkind>${KINDS.map(k => `<option ${k === t.kind ? "selected" : ""}>${k}</option>`).join("")}</select>
+        <select data-trank>${RANKS.map(k => `<option ${k === t.rank ? "selected" : ""}>${k}</option>`).join("")}</select>`}
+        <input type="number" min="0" max="40" data-tticks value="${t.ticks || 0}" title="ticks (4 to a box)"><span class="muted small">ticks</span>
+        ${legacy ? `<input type="hidden" data-tkind value="legacy"><input type="hidden" data-trank value="legacy">` : ""}</div>
+      ${t.name ? boxesHTML(t.ticks || 0) : ""}</div>`;
+  };
+  return `<div class="tracks">${tracks.map(row).join("")}${row({ name: "", kind: "vow", rank: "dangerous", ticks: 0 }, tracks.length)}</div>`;
+}
+function readTracks(key) {
+  return [...$("drawerBody").querySelectorAll(`[data-track="${key}"]`)].map(el => ({
+    name: el.querySelector("[data-tname]").value.trim(), kind: el.querySelector("[data-tkind]").value,
+    rank: el.querySelector("[data-trank]").value, ticks: +el.querySelector("[data-tticks]").value || 0,
+  })).filter(t => t.name);
 }
 async function bumpCounter(name, delta, part) {
   const d = await api(`/api/campaigns/${S.slug}/character`);
   const sh = d.sheet; if (!sh) return;
   const r = (sh.resources || []).find(x => x.name === name); if (!r) return;
-  r.current = Math.max(0, r.max ? Math.min(r.max, r.current + delta) : r.current + delta);
+  const low = r.min || 0;
+  r.current = Math.max(low, r.max ? Math.min(r.max, r.current + delta) : r.current + delta);
   try { await api(`/api/campaigns/${S.slug}/character`, { method: "PUT", body: JSON.stringify(sh) }); await refreshSigs(); renderSheet(part); }
   catch (e) { $("sheetMsg").textContent = e.message; }
 }
@@ -1500,6 +1571,9 @@ async function saveSheetFields(old, done) {
     const k = el.dataset.sys;
     if (el.dataset.score) sys[k] = { ...(sys[k] || {}), [el.dataset.score]: +el.value || 0 };
     else sys[k] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.type === "number" ? +el.value || 0 : el.value;
+  });
+  $("drawerBody").querySelectorAll(".tracks").forEach(el => {
+    const key = el.querySelector("[data-track]")?.dataset.track; if (key) sys[key] = readTracks(key);
   });
   if (Object.keys(sys).length) body.system = sys;
   try {

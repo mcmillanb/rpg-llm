@@ -1,0 +1,40 @@
+id: ironsworn
+name: Ironsworn
+genre: Fantasy
+blurb: "Dark fantasy built for solo play: swear iron vows in the Ironlands, with oracles in place of a script."
+matches: ["ironsworn", "ironsworn classic"]
+theme: fantasy
+start_money: "none (supply)"
+hide_core: [skills, money, loans, assets]
+ironsworn: true
+check: 1D6
+primer_in_story: true
+required: [stats, asset_cards, tracks]
+sheet:
+  - {key: stats, label: Stats, type: scores, names: [Edge, Heart, Iron, Shadow, Wits], mods: plain}
+  - {key: asset_cards, label: "Assets (name: abilities marked, e.g. 'Swordmaster: 1')", type: list}
+  - {key: impacts, label: Debilities, type: list}
+  - {key: tracks, label: "Progress tracks (vows, journeys, fights, bonds)", type: tracks}
+  - {key: truths, label: Setting truths, type: list}
+aliases: {assets: asset_cards, paths: asset_cards, debilities: impacts, conditions: impacts, vows: tracks, progress: tracks, progress_tracks: tracks}
+resources:
+  - {name: Health, max: 5, current: 5}
+  - {name: Spirit, max: 5, current: 5}
+  - {name: Supply, max: 5, current: 5}
+  - {name: Momentum, max: 10, current: 2, min: -6}
+  - {name: Experience, max: 0, current: 0}
+# the bonds track: ticks marked one at a time, no experience from it
+legacy: {Bonds: 0}
+blocks_recovery: {Health: wounded, Spirit: shaken, Supply: unprepared}
+damage_example: "harm 2 from a dangerous foe: Health -2; suffer -1 momentum: Momentum -1; burning momentum: Momentum set to the reset"
+checks: {asset_cards: assets, impacts: impacts}
+explain: {asset_cards: assets}
+sheet_rules: >-
+  Follow the move's outcome exactly: "take +1 momentum" is Momentum +1, "suffer -2 health" is
+  Health -2 (all of it, even at 0: the app takes what's past 0 off momentum), "suffer -1 supply" is Supply -1, "mark progress" goes in "progress" (never in
+  resources). Burning momentum resets it: Momentum set to the reset value. Fulfilling a vow marks
+  experience (strong hit: troublesome 1, dangerous 2, formidable 3, extreme 4, epic 5; weak hit
+  one less): Experience +N. Forge a Bond marks a tick on Bonds. Marking a debility (wounded,
+  shaken, maimed...) adds it to impacts; clearing one removes it. Spending experience on Advance:
+  Experience -3 for a new asset, -2 for another ability; the asset goes in asset_cards as
+  "Name: abilities marked".

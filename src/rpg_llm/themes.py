@@ -43,7 +43,7 @@ THEMES = {
         "label": "Fantasy",
         "genre": "fantasy",
         "palette": "lush greens, golden light and warm earth tones",
-        "matches": ["fantasy", "dungeons", "d&d", "pathfinder", "dark eye", "exalted"],
+        "matches": ["fantasy", "dungeons", "d&d", "pathfinder", "dark eye", "exalted", "ironsworn"],
         "settings": {
             "wilds": "Wild northern country at dusk: pine forest and misty hills along the edges, "
                      "a distant ruined watchtower at the left, soft clouds",

@@ -1,0 +1,3 @@
+The rules reference and oracle tables in this pack are from Ironsworn: Starforged Rulebook by Shawn Tomkin (ironswornrpg.com), used under the Creative Commons Attribution 4.0 International license (https://creativecommons.org/licenses/by/4.0/), by way of the Datasworn data (github.com/rsek/datasworn). They have been reformatted as searchable text and tables; the rules summary and session 0 steps are our own summary of the same rules.
+
+This work is based on Ironsworn: Starforged Rulebook (found at www.ironswornrpg.com), created by Shawn Tomkin, and licensed for our use under the Creative Commons Attribution 4.0 International license. This project is unofficial and not affiliated with Shawn Tomkin or Tomkin Press.

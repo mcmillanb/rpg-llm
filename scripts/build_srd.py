@@ -11,6 +11,10 @@ Documents, as searchable entries for the GM's rules_lookup tool.
 --cepheus: a checkout of github.com/orffen/cepheus-srd (Cepheus Engine SRD, the open Traveller
   rules, OGL 1.0a), for the Traveller pack. The chapters split by heading; one entry per career.
 
+--datasworn: a checkout of github.com/rsek/datasworn (the Ironsworn and Ironsworn: Starforged rules
+  as JSON, CC-BY-4.0), for the Ironsworn and Starforged packs: moves, assets, oracles, setting
+  truths, the rules for stats, meters and impacts; and oracles.json, the tables the GM rolls on.
+
 Writes src/rpg_llm/packs/<pack>/reference.jsonl ({title, category, text} per line) and the
 licence notice next to it; for Daggerheart also creation_official.md (the SRD's character
 creation steps and the options tables).
@@ -311,11 +315,158 @@ def cepheus(root: Path) -> None:
     (PACKS / "traveller" / "creation_official.md").write_text("\n".join(out) + "\n")
 
 
+# ---- Ironsworn and Starforged (Datasworn JSON) ----------------------------------------------
+
+def _ds_tables(node, out: dict) -> dict:
+    """Every rollable table in the data, by id ('starforged/oracles/core/action')."""
+    if isinstance(node, dict):
+        if node.get("_id") and isinstance(node.get("rows"), list):
+            out[node["_id"]] = node
+        for v in node.values():
+            _ds_tables(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _ds_tables(v, out)
+    return out
+
+
+def _ds_row(row: dict) -> str:
+    text = " / ".join(str(row[k]) for k in ("text", "text2", "text3") if row.get(k))
+    return text
+
+
+def _ds_table_text(t: dict, plain) -> str:
+    rows = []
+    for r in t["rows"]:
+        if r.get("min") is None:
+            continue
+        roll = f"{r['min']}" if r["min"] == r["max"] else f"{r['min']}-{r['max']}"
+        rows.append(f"{roll}: {plain(_ds_row(r))}")
+    return "\n".join(rows)
+
+
+def first_sentence(text: str) -> str:
+    """A truth's summary, where the data has none (classic Ironsworn): its opening sentence."""
+    m = re.match(r"(.{20,240}?[.!?])(\s|$)", text, re.S)
+    return (m.group(1) if m else text[:240]).strip()
+
+
+def datasworn(path: Path, pack: str) -> None:
+    """Ironsworn or Starforged from Datasworn: one entry per move, asset, oracle table, truth,
+    impact, stat and sample NPC; and oracles.json, every table for the GM's oracle tool."""
+    d = json.loads(path.read_text())
+    tables = _ds_tables(d, {})
+
+    def plain(text: str, depth: int = 0) -> str:
+        text = re.sub(r"\[([^\]]+)\]\(id:[^)]*\)", r"\1", str(text or ""))
+        def table(m):
+            t = tables.get(m.group(1))
+            return ("\n" + _ds_table_text(t, lambda x: plain(x, depth + 1)) + "\n") if t and depth < 2 else ""
+        text = re.sub(r"\{\{table[^:]*:([^}]+)\}\}", table, text)
+        text = re.sub(r"\{\{[^}]*\}\}", "", text)
+        return text.replace("__", "").strip()
+
+    entries = []
+    rolls = {"action_roll": "action roll", "progress_roll": "progress roll", "no_roll": "no roll",
+             "special_track": "special track roll"}
+    for cat in d["moves"].values():
+        for m in cat["contents"].values():
+            entries.append({"title": m["name"], "category": "moves",
+                            "text": f"{m['name']} ({cat['name']} move; {rolls.get(m.get('roll_type'), m.get('roll_type'))})\n\n{plain(m['text'])}"})
+    for cat in d["assets"].values():
+        for a in cat["contents"].values():
+            lines = [f"{a['name']} ({a['category']} asset)"]
+            if a.get("requirement"):
+                lines.append(f"Requirement: {plain(a['requirement'])}")
+            for k, o in (a.get("options") or {}).items():
+                lines.append(f"Write in: {o.get('label') or k}")
+            for k, c in (a.get("controls") or {}).items():
+                if c.get("field_type") == "condition_meter":
+                    lines.append(f"{(c.get('label') or k).capitalize()}: a meter from 0 to {c.get('max')}")
+            for i, ab in enumerate(a.get("abilities") or [], 1):
+                lines.append(f"{i}. {'(marked at the start) ' if ab.get('enabled') else ''}{plain(ab['text'])}")
+            entries.append({"title": a["name"], "category": "assets", "text": "\n".join(lines)})
+
+    oracles = []
+    def walk(node, trail):
+        for t in (node.get("contents") or {}).values():
+            name = " / ".join(trail + [t["name"]])
+            if isinstance(t.get("rows"), list):
+                rows = [[r["min"], r["max"], plain(_ds_row(r))] for r in t["rows"] if r.get("min") is not None]
+                oracles.append({"name": name, "dice": t.get("dice", "1d100"), "rows": rows})
+                entries.append({"title": f"Oracle: {name}", "category": "oracles",
+                                "text": (plain(t.get("summary") or "") + "\n\n" + _ds_table_text(t, plain)).strip()})
+            else:  # a group of tables rolled together (a planet's atmosphere, life...)
+                walk(t, trail + [t["name"]])
+        for c in (node.get("collections") or {}).values():
+            walk(c, trail + [c["name"]])
+    for c in d["oracles"].values():
+        walk(c, [c["name"]])
+
+    for t in d.get("truths", {}).values():
+        opts = []
+        for o in t.get("options") or []:
+            roll = f"{o['min']}-{o['max']}" if o.get("min") else ""
+            opts.append(f"{roll}: {plain(o.get('summary') or '')}\n{plain(o.get('description') or '')}"
+                        + (f"\nQuest starter: {plain(o['quest_starter'])}" if o.get("quest_starter") else ""))
+        entries.append({"title": f"Truth: {t['name']}", "category": "truths", "text": "\n\n".join(opts)})
+        oracles.append({"name": f"Truths / {t['name']}", "dice": "1d100",
+                        "rows": [[o["min"], o["max"], plain(o.get("summary") or "") or first_sentence(plain(o.get("description") or ""))]
+                                 for o in t.get("options") or [] if o.get("min")]})
+
+    rules = d["rules"]
+    for k, st in rules["stats"].items():
+        entries.append({"title": f"Stat: {k}", "category": "rules", "text": f"{k}: {st['description']}"})
+    for k, m in rules["condition_meters"].items():
+        entries.append({"title": f"Condition meter: {k}", "category": "rules",
+                        "text": f"{k} (0 to {m['max']}, starts at {m['value']}{', shared by the party' if m.get('shared') else ''}): {m['description']}"})
+    for group in rules["impacts"].values():
+        entries.append({"title": f"Impacts: {group['label']}", "category": "rules", "text": plain(group.get("description") or "")})
+        for k, imp in group["contents"].items():
+            stops = f" While marked, {', '.join(imp['prevents_recovery'])} can't be raised." if imp.get("prevents_recovery") else ""
+            entries.append({"title": imp["label"].capitalize(), "category": "impacts",
+                            "text": f"{imp['label']} ({group['label']}{', permanent' if imp.get('permanent') else ''}): {plain(imp['description'])}{stops}"})
+    for k, tr in rules["special_tracks"].items():
+        entries.append({"title": f"Legacy track: {tr['label']}" if "legacy" in k else f"Track: {tr['label']}",
+                        "category": "rules", "text": f"{tr['label']}: {tr['description']}"})
+    for cat in (d.get("npcs") or {}).values():
+        for n in (cat.get("contents") or {}).values():
+            text = [f"{n['name']} ({cat['name']}; rank {n.get('rank', '?')}, {n.get('nature', '')})", plain(n.get("summary") or ""),
+                    plain(n.get("description") or ""), "Features: " + "; ".join(plain(x) for x in n.get("features") or []),
+                    "Drives: " + "; ".join(plain(x) for x in n.get("drives") or []),
+                    "Tactics: " + "; ".join(plain(x) for x in n.get("tactics") or [])]
+            entries.append({"title": n["name"], "category": "npcs", "text": "\n".join(t for t in text if t.strip(": "))})
+
+    title = d["title"]
+    write(pack, entries,
+          f"The rules reference and oracle tables in this pack are from {title} by Shawn Tomkin "
+          f"(ironswornrpg.com), used under the Creative Commons Attribution 4.0 International license "
+          f"(https://creativecommons.org/licenses/by/4.0/), by way of the Datasworn data "
+          f"(github.com/rsek/datasworn). They have been reformatted as searchable text and tables; the "
+          f"rules summary and session 0 steps are our own summary of the same rules.\n\n"
+          f"This work is based on {title} (found at www.ironswornrpg.com), created by Shawn Tomkin, and "
+          f"licensed for our use under the Creative Commons Attribution 4.0 International license. This "
+          f"project is unofficial and not affiliated with Shawn Tomkin or Tomkin Press.")
+    (PACKS / pack / "oracles.json").write_text(json.dumps(oracles, ensure_ascii=False) + "\n")
+    print(f"{pack}: {len(oracles)} oracle tables")
+
+    # session 0: the options at a glance (each asset's text is in the reference)
+    out = ["## Options (from the rules data)", ""]
+    for cat in d["assets"].values():
+        out.append(f"### {re.sub(r' Assets$', '', cat['name'])} assets\n\n" + ", ".join(a["name"] for a in cat["contents"].values()) + ".\n")
+    launch = d["oracles"].get("campaign_launch")
+    bg = (launch or {}).get("contents", {}).get("background_assets")
+    if bg:
+        out += ["### Backgrounds (two paths each)", "", _ds_table_text(bg, plain), ""]
+    (PACKS / pack / "creation_official.md").write_text("\n".join(out).strip() + "\n")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--daggerheart", type=Path)
     ap.add_argument("--dnd", type=Path)
     ap.add_argument("--cepheus", type=Path, help="a checkout of github.com/orffen/cepheus-srd")
+    ap.add_argument("--datasworn", type=Path, help="a checkout of github.com/rsek/datasworn")
     a = ap.parse_args()
     if a.daggerheart:
         daggerheart(a.daggerheart)
@@ -323,3 +474,6 @@ if __name__ == "__main__":
         dnd(a.dnd)
     if a.cepheus:
         cepheus(a.cepheus)
+    if a.datasworn:
+        datasworn(a.datasworn / "datasworn" / "starforged" / "starforged.json", "starforged")
+        datasworn(a.datasworn / "datasworn" / "classic" / "classic.json", "ironsworn")

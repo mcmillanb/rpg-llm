@@ -78,6 +78,9 @@ def _route(pack: dict, key: str):
     """Where a key the GM used belongs: ('core', field), ('system', field), ('append', field),
     ('resource', name) or (None, key)."""
     n = _norm(key)
+    for alias, field in (pack.get("aliases") or {}).items():  # "assets" -> asset_cards
+        if n == _norm(alias):
+            return "system", field
     for f in sheet.FIELDS:
         if n == _norm(f):
             return "core", f
@@ -117,7 +120,12 @@ def update(campaign: Campaign, args: dict, after: int) -> str:
             sh[field] = v
         elif where == "system":
             old = system.get(field)
-            if isinstance(v, dict) and isinstance(old, dict):
+            kind = next((f["type"] for f in pack.get("sheet") or [] if f["key"] == field), None)
+            if kind == "tracks":  # a track given is added or replaces its namesake; the rest stay
+                given_tracks = [t for t in (sheet.track_from(x, pack) for x in (v if isinstance(v, list) else [v])) if t]
+                names = {t["name"].lower() for t in given_tracks}
+                system[field] = [t for t in old or [] if t["name"].lower() not in names] + given_tracks
+            elif isinstance(v, dict) and isinstance(old, dict):
                 # "Dex", "dexterity" or "DEX": the sheet's own score names
                 names = {n.lower()[:3]: n for n in old}
                 v = {names.get(str(k).lower()[:3], k): x for k, x in v.items()}
@@ -153,8 +161,10 @@ def update(campaign: Campaign, args: dict, after: int) -> str:
     # the rules text for what was just chosen, once per choice
     seen = set(campaign.meta.get("session0_explained") or [])
     explained = []
+    called = {f: [k for k, a in (pack.get("aliases") or {}).items() if a == f] for f in pack.get("explain") or {}}
     for field in (pack.get("explain") or {}):
-        given = [(args.get("system") or {}).get(field), (args.get("fields") or {}).get(field)]
+        given = [src.get(k) for src in (args.get("system") or {}, args.get("fields") or {})
+                 for k in (field, *called[field])]
         for value in [x for v in given for x in (v if isinstance(v, list) else [v])]:
             name = re.split(r"\s*[(:]|\s+[-–]\s+", str(value or ""))[0].strip()
             if name and f"{field}:{name.lower()}" not in seen:
@@ -187,6 +197,10 @@ def update(campaign: Campaign, args: dict, after: int) -> str:
         out += "\n\n" + dnd_numbers(pack, saved, rolled(campaign))
     if pack["id"] == "traveller":
         out += "\n\n" + traveller_numbers(saved)
+    if pack.get("ironsworn"):
+        stats = sorted(((saved.get("system") or {}).get("stats") or {}).values())
+        if all(stats) and stats != [1, 1, 2, 2, 3]:
+            out += f"\n\nThe stats are {stats}: they must be 3, 2, 2, 1 and 1, one each."
     for text in explained:
         out += "\n\n" + text
     for field, bad in unconfirmed:
@@ -296,6 +310,9 @@ def finish(campaign: Campaign, args: dict, after: int) -> str | None:
     sh = sheet.load(campaign)
     if sh:  # play starts with nothing marked and nothing damaged, whatever was written along the way
         res = [{**r, "current": 0} if r.get("marks") else dict(r) for r in sh.get("resources") or []]
+        if packs.for_campaign(campaign.meta).get("ironsworn"):  # meters full; momentum as it stands
+            res = [{**r, "current": r["max"]} if r["max"] and r["name"].lower() not in ("momentum", "experience")
+                   else r for r in res]
         sheet.follow_scores(res, sh.get("system") or {}, packs.for_campaign(campaign.meta), full=True)
         if res != sh.get("resources") or args.get("appearance"):
             sheet.save(campaign, {**sh, "resources": res, "appearance": meta.get("appearance") or sh["appearance"]},

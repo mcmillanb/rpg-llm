@@ -24,7 +24,7 @@ REQUEST_TOOL = {"type": "function", "function": {
                    "dice; the prompt is a few words. Call it as a tool: never write its "
                    "arguments into the story.",
     "parameters": {"type": "object", "properties": {
-        "dice": {"type": "string", "description": "e.g. 2D6+1, d20+3, 2D20KH1+3 (advantage), 2D20KL1+3 (disadvantage), 2D12+2 (Daggerheart), d100"},
+        "dice": {"type": "string", "description": "e.g. 2D6+1, d20+3, 2D20KH1+3 (advantage), 2D20KL1+3 (disadvantage), 2D12+2 (Daggerheart), d100; Ironsworn: 1D6+iron+1 (an action roll: the stat by name, the challenge dice are added) or progress (a progress roll: name the track in the prompt)"},
         "prompt": {"type": "string", "description": "a few words, e.g. 'Roll to attack the goblin'"},
         "target": {"type": "integer", "description": "number to compare against (optional)"},
         "success_if": {"type": "string", "enum": ["at_least", "at_most"],
@@ -88,7 +88,8 @@ def notation(count: int, sides: int, mod: int) -> str:
 def request(args: dict, roll_under_ok: bool = True) -> dict:
     """A validated roll request from the GM's request_roll call (nothing rolled yet).
     roll_under_ok=False forces roll-high, for systems where "at most" is always a mistake."""
-    req = {"id": secrets.token_hex(6), "dice": canon(str(args.get("dice", ""))),
+    text = str(args.get("dice", ""))
+    req = {"id": secrets.token_hex(6), "dice": progress_notation(text) or canon(text),
            "prompt": str(args.get("prompt") or "Roll").strip()[:120]}
     if isinstance(args.get("target"), int):
         req["target"] = args["target"]
@@ -115,11 +116,100 @@ def great_weapon(dice: str, reason: str, weapon_dice: list[tuple[int, int]]) -> 
                for count, sides in weapon_dice)
 
 
+# ---- Ironsworn and Starforged: the action roll and the progress roll ------------------------
+
+_PROGRESS = re.compile(r"^\s*progress(?:\s*(?:roll|score))?\s*(?:[:=+]?\s*(\d+))?\s*$", re.I)
+
+
+def progress_notation(dice: str) -> str | None:
+    """'progress', 'progress 6', 'Progress roll' -> 'PROGRESS' / 'PROGRESS 6'."""
+    m = _PROGRESS.match(dice or "")
+    return None if not m else f"PROGRESS {m.group(1)}" if m.group(1) else "PROGRESS"
+
+
+def action_die(dice: str) -> bool:
+    """An Ironsworn action roll: one d6 and adds ('1D6+2', 'd6+3')."""
+    try:
+        ts, _ = terms(dice)
+    except ValueError:
+        return False
+    return len(ts) == 1 and ts[0]["count"] == 1 and ts[0]["sides"] == 6 and not ts[0]["keep"] and ts[0]["sign"] > 0
+
+
+def challenge_roll(dice: str, reason: str = "", momentum: int | None = None, reset: int = 2,
+                   progress: int | None = None, track: str | None = None) -> dict:
+    """The action roll (d6 + adds, 10 at most) or the progress roll (the track's filled boxes),
+    against two d10. `momentum`: the player's, for what burning it would do and for negative
+    momentum cancelling the action die. `progress`: the score for a progress roll."""
+    c = [secrets.randbelow(10) + 1, secrets.randbelow(10) + 1]
+    if progress_notation(dice):
+        m = _PROGRESS.match(dice)
+        score = max(0, min(10, progress if progress is not None else int(m.group(1) or 0)))
+        out = {"dice": progress_notation(dice), "reason": reason.strip(), "rolls": c, "modifier": 0,
+               "total": score, "sides": [10, 10]}
+        kind, action = "progress", None
+    else:
+        _, mod = terms(dice)
+        action = secrets.randbelow(6) + 1
+        counted = 0 if momentum is not None and momentum < 0 and action == -momentum else action
+        score = min(10, counted + mod)
+        out = {"dice": canon(dice), "reason": reason.strip(), "rolls": [action, *c], "modifier": mod,
+               "total": score, "sides": [6, 10, 10]}
+        kind = "action"
+    beats = sum(score > x for x in c)
+    ch = {"kind": kind, "score": score, "challenge": c, "match": c[0] == c[1],
+          "outcome": ("strong hit", "weak hit", "miss")[2 - beats]}
+    if kind == "progress":
+        ch["track"] = track
+    if kind == "action" and counted != action:
+        ch["cancelled"] = True  # negative momentum equal to the action die
+    if kind == "action" and momentum is not None and momentum > 0:
+        burnt = sum(momentum > x for x in c)
+        if burnt > beats:
+            ch["burn"] = {"momentum": momentum, "reset": reset, "outcome": ("strong hit", "weak hit")[2 - burnt]}
+    out["challenge"] = ch
+    return out
+
+
+def _challenge_note(r: dict) -> str:
+    ch = r.get("challenge")
+    if not ch:
+        return ""
+    o = ch["outcome"].upper()
+    text = (f" {o}: {'progress' if ch['kind'] == 'progress' else 'action'} score {ch['score']} against "
+            f"challenge dice {ch['challenge'][0]} and {ch['challenge'][1]}.")
+    if ch["kind"] == "progress" and ch.get("track"):
+        text += f" (The progress of {ch['track']}.)"
+    elif ch["kind"] == "progress" and not re.search(r"\d", r["dice"]):  # nothing to go on
+        text += (" No progress track on the sheet matched the roll's reason, so it counted 0 progress: if "
+                 "that's wrong, say so and ask again naming the track.")
+    if ch.get("cancelled"):
+        text += " The action die equals the negative momentum, so it counts as 0."
+    if ch["match"]:
+        text += (" A MATCH (the challenge dice are the same): " +
+                 ("an extra benefit or an unexpected opportunity." if ch["outcome"] == "strong hit" else
+                  "a dire threat or a twist." if ch["outcome"] == "miss" else "a twist.") )
+    b = ch.get("burn")
+    if b:
+        text += (f" The player may burn momentum ({b['momentum']:+d}) to make it a {b['outcome']}: "
+                 f"offer it before narrating the result; if they do, momentum resets to {b['reset']:+d}.")
+    if not b:
+        text += (f" Follow the move's {ch['outcome']} text and say in bold what it gives or costs, "
+                 "momentum included (\"**+1 momentum**\", \"**-2 health**\", \"**mark progress on …**\").")
+    return text
+
+
 def roll(dice: str, reason: str = "", target: int | None = None,
-         success_if: str = "at_least", duality: bool = False, floor: int = 0) -> dict:
+         success_if: str = "at_least", duality: bool = False, floor: int = 0,
+         ironsworn: dict | None = None) -> dict:
     """Roll it. `duality`: Daggerheart, where a roll starting 2D12 is the Hope die and the Fear
     die: which is higher decides "with Hope" or "with Fear", and matching dice are a critical.
-    `floor`: the first term's dice count at least this (Great Weapon Fighting: 1s and 2s are 3s)."""
+    `floor`: the first term's dice count at least this (Great Weapon Fighting: 1s and 2s are 3s).
+    `ironsworn`: {momentum, reset, progress}: an action roll ('1D6+2') or a progress roll
+    ('PROGRESS') is made against the challenge dice."""
+    if ironsworn is not None and (progress_notation(dice) or action_die(dice)):
+        return challenge_roll(dice, reason, ironsworn.get("momentum"), ironsworn.get("reset", 2),
+                              ironsworn.get("progress"), ironsworn.get("track"))
     ts, mod = terms(dice)
     rolls, kept, parts, total = [], [], [], mod
     raw = []
@@ -161,6 +251,12 @@ def roll(dice: str, reason: str = "", target: int | None = None,
 
 def _dice_text(r: dict) -> str:
     """'17 + [6]' (a dropped die in brackets), or 'Hope 7, Fear 11' for Duality Dice."""
+    if r.get("challenge"):
+        c = r["challenge"]["challenge"]
+        if r["challenge"]["kind"] == "progress":
+            return f"progress {r['total']} vs challenge {c[0]}, {c[1]}"
+        mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
+        return f"action die {r['rolls'][0]}{mod} = {r['total']} vs challenge {c[0]}, {c[1]}"
     kept = r.get("kept") or [True] * len(r["rolls"])
     signs = r.get("signs") or [1] * len(r["rolls"])
     raw = r.get("raw") or r["rolls"]
@@ -202,6 +298,9 @@ def _gwf_note(r: dict) -> str:
 def describe(r: dict) -> str:
     """What the GM reads back."""
     mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
+    if r.get("challenge"):
+        return (f"{r['dice']} for {r['reason'] or 'the move'}: rolled {_dice_text(r)}."
+                + _challenge_note(r) + " Narrate from this result.")
     text = f"{r['dice']} for {r['reason'] or 'the action'}: rolled {_dice_text(r)}{mod} = {r['total']}."
     if "target" in r:
         need = f"{r['target']} or {'less' if r['success_if'] == 'at_most' else 'more'}"
@@ -214,6 +313,8 @@ def describe(r: dict) -> str:
 def player_line(r: dict) -> str:
     """The player's turn after an on-screen roll, as the GM reads it."""
     mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
+    if r.get("challenge"):
+        return f"🎲 {r['reason'] or 'Roll'}: {r['dice']} → {_dice_text(r)}." + _challenge_note(r)
     text = f"🎲 {r['reason'] or 'Roll'}: {r['dice']} → {_dice_text(r)}{mod} = {r['total']}"
     if "target" in r:
         text += (f" (needed {r['target']} or {'less' if r['success_if'] == 'at_most' else 'more'}: "
@@ -324,6 +425,35 @@ def asked_roll(text: str) -> str | None:
         return last
     end = re.split(r"(?<=[.!?])\s+", last)[-1].strip("*_ ")
     return end if len(end) <= 160 and (_ASK.search(end) or _ASK_RESULT.search(end)) else None
+
+
+# Ironsworn: "Face Danger: roll +edge." / "Roll +iron to break the door"
+_STAT_ROLL = re.compile(r"\broll\s*(?:\*\*)?\s*\+\s*(edge|heart|iron|shadow|wits|health|spirit|supply|integrity)\b"
+                        r"(?:\s*(?:\*\*)?\s*(?:\+\s*(\d+))?)?(?:[^.\n]{0,40}?\b(?:to|for)\s+([^.\n]{3,120}))?", re.I)
+
+
+# ...or with the stat in brackets: "**Face Danger (+Edge)**. Roll to see if you reach the vent."
+_STAT_BRACKET = re.compile(r"\(\s*\+\s*(edge|heart|iron|shadow|wits|health|spirit|supply|integrity)\s*\)()"
+                           r"(?:[^\n]{0,60}?\broll\s+(?:to|for)\s+([^.\n]{3,120}))?", re.I)
+
+
+def stat_request(text: str, key: str, moves: list[str] = ()) -> dict | None:
+    """Ironsworn: a move's roll asked for in words ('Face Danger: roll +edge', 'Face Danger
+    (+Edge). Roll to...'), as dice with the stat named in them (the caller puts the number in):
+    the last one in the reply, under the name of the last of `moves` mentioned before it."""
+    matches = sorted(list(_STAT_ROLL.finditer(text or "")) + list(_STAT_BRACKET.finditer(text or "")),
+                     key=lambda x: x.start())
+    if not matches:
+        return None
+    m = matches[-1]
+    before = text[max(0, m.start() - 300):m.start()].lower()
+    named = [(before.rfind(mv.lower()), mv) for mv in moves if mv.lower() in before]
+    name = max(named)[1] if named else ""
+    goal = (m.group(3) or "").strip().rstrip(",;:*")
+    prompt = (f"{name}: " if name else "") + (f"Roll +{m.group(1).lower()}" + (f" to {goal}" if goal else ""))
+    return {"id": "t" + hashlib.sha1(f"{key}:{m.group(0)}".encode()).hexdigest()[:11],
+            "dice": f"1D6+{m.group(1).lower()}" + (f"+{m.group(2)}" if m.group(2) else ""),
+            "prompt": prompt[:120], "from_text": True}
 
 
 def copied_roll_line(text: str) -> str | None:

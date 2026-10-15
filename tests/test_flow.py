@@ -1597,3 +1597,168 @@ async def test_traveller_damage_never_lowers_the_scores_and_waits_for_its_roll(v
     assert dice.request_from_text(c.messages()[-1]["content"], "k")["dice"] == "2D6-5"
     await sheet.update(c, FakeLLM([reply({"Str": 3}, [{"name": "Strength", "change": -2}])]))
     assert by()["Strength"] == (5, 5) and sheet.load(c)["system"]["characteristics"]["Str"] == 5
+
+
+def test_ironsworn_dice_outcomes_matches_momentum_and_progress(monkeypatch):
+    from rpg_llm import dice, packs
+    assert packs.match("Ironsworn: Starforged")["id"] == "starforged"
+    assert packs.match("Starforged")["id"] == "starforged" and packs.match("Ironsworn")["id"] == "ironsworn"
+    faces = []
+    monkeypatch.setattr(dice.secrets, "randbelow", lambda n: faces.pop(0) - 1)
+    faces[:] = [4, 3, 9]  # c1, c2 first, then the action die: 4 + 2 = 6 beats 3, not 9
+    faces[:] = [3, 9, 4]
+    r = dice.roll("1D6+2", "Face Danger", ironsworn={"momentum": 10, "reset": 1})
+    assert r["challenge"]["outcome"] == "weak hit" and r["total"] == 6 and r["rolls"] == [4, 3, 9]
+    assert r["challenge"]["burn"] == {"momentum": 10, "reset": 1, "outcome": "strong hit"}
+    assert "burn momentum (+10) to make it a strong hit" in dice.describe(r) and "resets to +1" in dice.describe(r)
+    faces[:] = [5, 5, 6]  # a tie doesn't beat; matching challenge dice
+    r = dice.roll("1D6-1", "Strike", ironsworn={"momentum": 2})
+    assert r["challenge"]["outcome"] == "miss" and r["challenge"]["match"] and "burn" not in r["challenge"]
+    assert "A MATCH" in dice.player_line(r)
+    faces[:] = [1, 2, 3]  # momentum -3 and a 3 on the action die: it counts 0
+    r = dice.roll("1D6+3", "Clash", ironsworn={"momentum": -3})
+    assert r["total"] == 3 and r["challenge"]["cancelled"] and r["challenge"]["outcome"] == "strong hit"
+    faces[:] = [6, 10]  # a progress roll: the track's score, no action die, and action scores cap at 10
+    r = dice.roll("PROGRESS", "Fulfill Your Vow", ironsworn={"progress": 7, "track": "Find Kira"})
+    assert r["challenge"]["outcome"] == "weak hit" and r["rolls"] == [6, 10] and "Find Kira" in dice.describe(r)
+    faces[:] = [9, 9, 6]
+    assert dice.roll("1D6+6", "x", ironsworn={})["total"] == 10
+    assert dice.request({"dice": "Progress roll", "prompt": "x"})["dice"] == "PROGRESS"
+    faces[:] = [44, 4]  # other dice roll as usual
+    assert dice.roll("1D100", "x", ironsworn={})["total"] == 44
+
+
+def test_ironsworn_oracles():
+    from rpg_llm import packs
+    assert packs.find_oracle("starforged", "Action")["name"] == "Core Oracles / Action"
+    assert packs.find_oracle("starforged", "desert world atmosphere")["name"] == "Planet Oracles / Desert World / Atmosphere"
+    assert packs.find_oracle("ironsworn", "Pay the Price")["name"] == "Moves / Pay the Price"
+    assert packs.find_oracle("starforged", "Spaceship Bingo") is None
+    text, rec = packs.ask_oracle("starforged", {"table": "Theme"})
+    assert text.startswith("Oracle Core Oracles / Theme: rolled") and rec["oracle"] and 1 <= rec["total"] <= 100
+    text, rec = packs.ask_oracle("ironsworn", {"question": "Is the bridge out?", "odds": "almost certain"})
+    assert "yes on 90 or less" in text and rec["oracle"] in ("Yes", "No")
+    assert packs.ask_oracle("starforged", {"table": "Nope"})[1] is None
+
+
+def test_starforged_session0_and_sheet_tracks_momentum_and_impacts(vault):
+    from rpg_llm import packs, session0
+    from rpg_llm.app import ironsworn_args, pending_roll, with_stats
+    sf = packs.get("starforged")
+    c = vault.create("T", system="Ironsworn: Starforged")
+    c.save_meta({**c.meta, "pack": "starforged", "mode": "rules", "session0": True, "dice": "virtual"})
+    sheet.save(c, sheet.blank(sf), 0, "blank")
+    blank = sheet.load(c)
+    assert [t["name"] for t in blank["system"]["tracks"]] == ["Quests", "Bonds", "Discoveries"]
+    assert next(r for r in blank["resources"] if r["name"] == "Momentum") == {"name": "Momentum", "current": 2, "max": 10, "min": -6}
+    # session 0: "assets" means the asset cards; a track given joins the others
+    out = session0.update(c, {"system": {"assets": ["Ace: 1", "Navigator: 1", "Space Wizard"],
+                                         "stats": {"edge": 3, "heart": 2, "iron": 2, "shadow": 2, "wits": 1},
+                                         "vows": [{"name": "Find my sister Kira", "kind": "vow", "rank": "epic"}]}}, 2)
+    sh = sheet.load(c)
+    assert sh["system"]["asset_cards"] == ["Ace: 1", "Navigator: 1"] and "Space Wizard" in out
+    assert "must be 3, 2, 2, 1 and 1" in out and "Ace (Path asset)" in out
+    assert [t["name"] for t in sh["system"]["tracks"]] == ["Quests", "Bonds", "Discoveries", "Find my sister Kira"]
+    session0.update(c, {"system": {"stats": {"shadow": 1}, "tracks": [{"name": "Bonds", "ticks": 2}]}}, 3)
+    assert sheet.find_track(sheet.load(c)["system"]["tracks"], "Bonds")["ticks"] == 2
+    sh = sheet.load(c)
+    sh["resources"] = sheet.apply_resources(sh["resources"], [{"name": "Health", "change": -2}])
+    sheet.save(c, sh, 4, "hurt")
+    assert session0.finish(c, {"premise": "A courier looking for her sister."}, 5)
+    sh = sheet.load(c)
+    assert {r["name"]: r["current"] for r in sh["resources"]}["Health"] == 5  # play starts whole
+    assert "Edge +3" in sheet.notes_block(sh, sf) and "Momentum reset: +2" in sheet.notes_block(sh, sf)
+
+    def reply(system=None, resources=(), progress=()):
+        new = sheet.load(c)
+        new["system"] = {**new["system"], **(system or {})}
+        return {"changes": ["moved on"], "changed": True, "payments": [], "resources": list(resources),
+                "progress": list(progress), "sheet": new}
+
+    # an expedition sworn and marked twice at its rank; the vow keeps its progress; Fulfill a
+    # dangerous vow's reward fills a legacy box: 2 experience, added here
+    tracks = [{"name": t["name"], "kind": t["kind"], "rank": t["rank"]} for t in sheet.load(c)["system"]["tracks"]]
+    play(c, ("I set out for the derelict.", "You Undertake an Expedition (dangerous) and make good time."))
+    r = asyncio.run(sheet.update(c, FakeLLM([reply({"tracks": tracks + [{"name": "Reach the Ravenna derelict", "kind": "expedition", "rank": "dangerous"}]},
+                                                   progress=[{"track": "Ravenna derelict", "marks": 2, "ticks": 0},
+                                                             {"track": "Quests", "marks": 0, "ticks": 4}])])))
+    tr = {t["name"]: t["ticks"] for t in sheet.load(c)["system"]["tracks"]}
+    assert tr["Reach the Ravenna derelict"] == 16 and tr["Quests"] == 4 and tr["Find my sister Kira"] == 0
+    assert any(x.startswith("Progress: Reach the Ravenna derelict: 4 boxes") for x in r["changes"])
+    assert {x["name"]: x["current"] for x in sheet.load(c)["resources"]}["Experience"] == 2
+    # a progress roll takes the score from the track it names
+    a = ironsworn_args(c, "PROGRESS", "Finish an Expedition: Ravenna derelict")
+    assert a["progress"] == 4 and a["track"] == "Reach the Ravenna derelict" and a["momentum"] == 2
+    assert with_stats(c, "1D6+edge+1") == "1D6+3+1"
+    # wounded: health can't rise and momentum's max and reset drop; a track left out is gone
+    play(c, ("I patch myself up.", "You're wounded but you tape the cut shut."))
+    asyncio.run(sheet.update(c, FakeLLM([reply({"impacts": ["wounded"], "tracks": tracks},
+                                               resources=[{"name": "Health", "change": -3, "set": None, "max": None},
+                                                          {"name": "Health", "change": 2, "set": None, "max": None},
+                                                          {"name": "Momentum", "change": 9, "set": None, "max": None}])])))
+    sh = sheet.load(c)
+    res = {x["name"]: x for x in sh["resources"]}
+    assert res["Health"]["current"] == 2 and res["Momentum"]["max"] == 9 and res["Momentum"]["current"] == 9
+    assert "Reach the Ravenna derelict" not in {t["name"] for t in sh["system"]["tracks"]}
+    assert "Momentum reset: +1; can't be raised now: health" in sheet.notes_block(sh, sf)
+    # momentum goes below zero, to -6 at most
+    play(c, ("Ugh.", "A major setback."))
+    asyncio.run(sheet.update(c, FakeLLM([reply(resources=[{"name": "Momentum", "change": -20, "set": None, "max": None}])])))
+    assert {x["name"]: x["current"] for x in sheet.load(c)["resources"]}["Momentum"] == -6
+    # a roll asked for in words gets a button, with the stat's number in it
+    play(c, ("I go for the hatch.", "The hatch is jammed.\n\n**Face Danger**: roll +edge to force it before the drones arrive."))
+    req = pending_roll(c, c.messages())
+    assert req["dice"] == "1D6+3" and req["prompt"].startswith("Face Danger: Roll +edge to force it")
+
+
+def test_ironsworn_harm_past_zero_comes_off_momentum_and_bracketed_stats():
+    from rpg_llm import dice
+    res = [{"name": "Health", "current": 1, "max": 5}, {"name": "Momentum", "current": 4, "max": 10, "min": -6}]
+    assert sheet.overflow_momentum(res, [{"name": "Health", "change": -3}]) == [{"name": "Momentum", "change": -2, "set": None, "max": None}]
+    assert sheet.overflow_momentum(res, [{"name": "Health", "change": -1}]) == []
+    # the model took it off momentum itself: not twice
+    assert sheet.overflow_momentum(res, [{"name": "Health", "change": -3}, {"name": "Momentum", "change": -2}]) == []
+    req = dice.stat_request("The ceiling shudders.\n\n**Face Danger (+Edge)**. Roll to see if you can reach the vent.", "k", ["Face Danger"])
+    assert req["dice"] == "1D6+edge" and req["prompt"] == "Face Danger: Roll +edge to see if you can reach the vent"
+
+
+def test_ironsworn_tracks_as_counters_progress_rolls_and_quoted_assets():
+    tracks = [{"name": "Bonds", "kind": "legacy", "rank": "legacy", "ticks": 0},
+              {"name": "Journey: The Beast's Trail", "kind": "journey", "rank": "dangerous", "ticks": 16}]
+    names = {"health", "momentum"}
+    keep, ticks = sheet.track_counters([{"name": "Bonds Track", "change": 2, "set": None, "max": 10},
+                                        {"name": "Health", "change": -1, "set": None}], tracks, names)
+    assert keep == [{"name": "Health", "change": -1, "set": None}]
+    assert ticks == [{"track": "Bonds", "marks": 0, "ticks": 2}]
+    # a counter the sheet already has is left alone, whatever its name
+    assert sheet.track_counters([{"name": "Health", "change": 1}], tracks, names)[1] == []
+    msgs = [{"role": "user", "content": "🎲", "roll": {"challenge": {"kind": "progress", "track": "Journey: The Beast's Trail"}}},
+            {"role": "assistant", "content": "x", "rolls": [{"challenge": {"kind": "action"}}]}]
+    assert sheet.progress_rolled(msgs) == {"journey: the beast's trail"}
+    from rpg_llm import packs
+    pack = packs.get("ironsworn")
+    sys_ = sheet.clean_system({"asset_cards": ["'''Archer: Sure Aim'''", "\"Hound: Bonded\""]}, pack)
+    assert sys_["asset_cards"] == ["Archer: Sure Aim", "Hound: Bonded"]
+
+
+def test_sheet_text_copied_from_yaml_loses_its_quotes_and_folding():
+    folded = '"Veyra has short choppy black hair, whipcord arms,\\  \\  and\\  a jagged\n  scar across her jaw."'
+    assert sheet.unquote(folded) == "Veyra has short choppy black hair, whipcord arms, and a jagged scar across her jaw."
+    assert sheet.unquote("'''Archer: Sure Aim'''") == "Archer: Sure Aim"
+    assert sheet.unquote('Veyra "Wraith\'s Shadow"') == 'Veyra "Wraith\'s Shadow"'
+    assert sheet.unquote('"Hi," she said, "there"') == '"Hi," she said, "there"'
+    assert sheet.clean({"concept": '"A courier pilot."', "gear": ["'Blaster: 2'"]})["gear"] == ["Blaster: 2"]
+    from rpg_llm import packs
+    pack = packs.get("starforged")
+    assert sheet.clean_system({"asset_cards": "Courier: 1; Ace: 1; Heavy Cannons: Gunship"}, pack)["asset_cards"] == \
+        ["Courier: 1", "Ace: 1", "Heavy Cannons: Gunship"]
+    assert sheet.clean_system({"asset_cards": {"Courier": 1, "Ace": None}}, pack)["asset_cards"] == ["Courier: 1", "Ace"]
+
+
+def test_ironsworn_progress_move_asked_as_an_action_roll_is_a_progress_roll(tmp_path):
+    from rpg_llm import app as app_mod
+    class C:
+        meta = {"system": "Ironsworn: Starforged", "pack": "starforged"}
+    c = C()
+    assert app_mod.with_stats(c, "1D6+edge", "Finish an Expedition: Roll +edge") == "PROGRESS"
+    assert app_mod.with_stats(c, "1D6+2", "Face Danger: Roll +edge") == "1D6+2"
