@@ -1762,3 +1762,10 @@ def test_ironsworn_progress_move_asked_as_an_action_roll_is_a_progress_roll(tmp_
     c = C()
     assert app_mod.with_stats(c, "1D6+edge", "Finish an Expedition: Roll +edge") == "PROGRESS"
     assert app_mod.with_stats(c, "1D6+2", "Face Danger: Roll +edge") == "1D6+2"
+
+
+def test_session0_choice_question_waits_for_the_answer():
+    assert dice.asks_choice("You remain a Third Officer.\n\nWhich table do you choose? Roll 1D6 on it to see what you learn.")
+    assert dice.asks_choice("Do you want to roll for **Cash** or **Material** benefits?")
+    assert not dice.asks_choice("Strength is 6 (DM +0). Next up: Dexterity. Roll 2D6.")
+    assert not dice.asks_choice("Which career you pick matters.\n\nRoll 2D6 for Endurance.")

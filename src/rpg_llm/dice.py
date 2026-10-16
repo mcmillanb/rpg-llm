@@ -456,6 +456,16 @@ def stat_request(text: str, key: str, moves: list[str] = ()) -> dict | None:
             "prompt": prompt[:120], "from_text": True}
 
 
+_CHOICE = re.compile(r"\b(?:which|choose|pick|prefer)\b[^?.!\n]*\?|\b\w+\*{0,2}\s+or\s+\*{0,2}\w+[^?.!\n]*\?", re.I)
+
+
+def asks_choice(text: str) -> bool:
+    """The reply's last paragraph asks the player to choose ("Which table do you choose?",
+    "Cash or Material?"): the roll waits for the answer."""
+    paras = [p for p in re.split(r"\n\s*\n", text or "") if p.strip()]
+    return bool(paras) and bool(_CHOICE.search(paras[-1]))
+
+
 def copied_roll_line(text: str) -> str | None:
     """A GM that asks for the next roll by copying the dice's own line ('🎲 Second characteristic
     roll:') instead of calling request_roll: the reason, if the reply ends that way."""

@@ -604,7 +604,10 @@ Use update_character to write each decision onto their sheet as it's made (the p
 sheet fill in), using these field names:
 {fields}
 Check its reply: anything listed as not recorded needs sending again under the right name. Use request_roll whenever a step calls for dice (for example rolling ability
-scores, one request per score). Only the results of those rolls count: never accept numbers the
+scores, one request per score). When a step gives the player a choice before its roll (which
+table to roll on, Cash or Material, which career), ask and wait: request the roll in your next
+reply, once they've chosen. For a roll against a number, give it as the request's target (and the
+modifier in the dice), so the dice say whether it succeeded. Only the results of those rolls count: never accept numbers the
 player types as dice results. When the character is complete and the player has picked how the adventure opens, call
 finish_session0, then narrate the opening scene.
 

@@ -475,6 +475,9 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
                     rargs = json.loads(tc["arguments"] or "{}")
                     if in_session0:
                         rargs["dice"] = session0.fix_dice(c.meta, str(rargs.get("dice", "")))
+                    if in_session0 and dice.asks_choice(content):  # "Which table do you choose?"
+                        raise ValueError("not requested: your reply asks the player to choose first. "
+                                         "End it with that question, and request the roll once they've answered")
                     rargs["dice"] = with_stats(c, str(rargs.get("dice", "")), str(rargs.get("prompt", "")))
                     requested = dice.request(rargs, dice.roll_under_system(c.meta.get("system") or ""))
                     yield sse({"type": "roll_request", **requested})

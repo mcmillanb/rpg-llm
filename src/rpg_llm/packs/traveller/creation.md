@@ -17,21 +17,23 @@ on screen with request_roll and recording each result with update_character as i
      the Draft (1D6 on the draft table, once only) or Drifter.
    - Basic training, first term of a career: every Service Skill at level 0 (in the first career;
      in a later career, just one of them).
-   - Survival roll. In this game a failed survival roll doesn't kill: roll 1D6 on the Survival
+   - Survival roll: 2D6 + the characteristic's DM, target the career's number (Survival 5+ is
+     target 5: a 6 succeeds). In this game a failed survival roll doesn't kill: roll 1D6 on the Survival
      Mishaps table (the optional rule): the character leaves the career after half a term and loses
      that term's benefit roll.
    - Commission (if the career has ranks and they're Rank 0), then Advancement (Rank 1+): each
      success is a rank up and an extra skill roll; take the rank's bonus skill. Careers without
      ranks roll twice on the skill tables each term instead.
-   - Skills: choose a table (Personal Development, Service, Specialist, or Advanced Education with
-     Edu 8+) and roll 1D6. A skill gained is level 1, or +1 if already held; a cascade skill needs
+   - Skills: the player chooses a table (Personal Development, Service, Specialist, or Advanced
+     Education with Edu 8+): ask which, wait for the answer, then request the 1D6 (one request per
+     skill roll, each with its own choice of table). A skill gained is level 1, or +1 if already held; a cascade skill needs
      its speciality chosen. "+1 Str" and the like raise the characteristic.
    - Aging: from the end of the 4th term (age 34), roll 2D6 - total terms on the Aging table.
    - Re-enlist roll to stay (a natural 12 means they must stay); 7 terms is the limit. Suggest 2-4
      terms in all: more terms means more skills but more aging.
 4. Mustering out, for each career left: one benefit roll per full term, +1 at rank 4, +2 at rank 5,
    +3 at rank 6. Each roll is 1D6 on Cash (3 rolls at most; Gambling or retired +1) or Material
-   (rank 5-6 +1). Record cash in money, passages, ship shares, Explorers' Society and the like under
+   (rank 5-6 +1): ask Cash or Material before each one. Record cash in money, passages, ship shares, Explorers' Society and the like under
    "benefits", and a weapon under "weapons". 5+ terms in one career pays a pension.
 5. Equipment: buy armour, weapons and gear from the money, at the prices in the reference. Record
    armour with its rating, weapons with damage and the skill they use, other gear under gear.
