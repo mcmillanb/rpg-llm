@@ -30,6 +30,15 @@ button { cursor: pointer; border: 1px solid var(--line); background: var(--panel
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
 .ui { font-family: system-ui, sans-serif; font-size: 14px; }
+.modepick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.modepick button { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px;
+  border: 2px solid var(--line); border-radius: 10px; }
+.modepick button strong { font-size: 15px; }
+.modepick button span { color: var(--muted); font-size: 13px; line-height: 1.35; }
+.modepick button[aria-checked="true"] { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.modepick button[aria-checked="true"] strong::before { content: "● "; color: var(--accent); }
+.modepick button[aria-checked="false"] strong::before { content: "○ "; color: var(--muted); }
 .muted { color: var(--muted); }
 header { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -583,7 +592,11 @@ function openNewCampaign() {
     <label>Name</label><input id="nName" placeholder="Traveller: The Spinward Run">
     <div id="nModeWrap">
       <label>How close to the rules?</label>
-      <select id="nMode"><option value="story">Story: a simple sheet, rules held lightly</option><option value="rules" id="nModeRules">Rules: the game's real sheet, and a session 0 to build your character</option></select>
+      <input type="hidden" id="nMode" value="story">
+      <div class="modepick" role="radiogroup">
+        <button type="button" role="radio" data-mode="story" aria-checked="true"><strong>Story</strong><span>A simple sheet, rules held lightly. Jump straight into the adventure.</span></button>
+        <button type="button" role="radio" data-mode="rules" aria-checked="false"><strong>Rules</strong><span>The game's real sheet, and a session 0 to build your character first.</span></button>
+      </div>
       <div class="muted small" id="nModeNote"></div>
     </div>
     <label>Game system / setting</label>
@@ -655,7 +668,11 @@ function openNewCampaign() {
   api("/api/themes").then(t => { $("nLook").innerHTML += Object.entries(t).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join(""); }).catch(() => {});
   $("nRefresh").onclick = () => loadSystems(true);
   $("nSystemPick").onchange = systemChanged;
-  $("nMode").onchange = () => { fillSystems(); modeChanged(); };
+  document.querySelectorAll(".modepick button").forEach(b => b.onclick = () => {
+    $("nMode").value = b.dataset.mode;
+    document.querySelectorAll(".modepick button").forEach(x => x.setAttribute("aria-checked", x === b));
+    fillSystems(); modeChanged();
+  });
   $("nSystem").addEventListener("change", checkPack);
   $("nSuggest").onclick = () => suggestPremise(true);
   if (S.imagesEnabled) {
@@ -681,7 +698,7 @@ function openNewCampaign() {
       theme: $("nLook").value, genre: SYSTEMS.find(x => x.name === chosenSystem())?.genre || "",
       portrait: PORT.at >= 0 ? PORT.history[PORT.at].token : "",
       tone: SYSTEMS.find(x => x.name === chosenSystem())?.blurb || "",
-      mode: PACK && $("nMode").value === "rules" ? "rules" : "story",
+      mode: $("nMode").value === "rules" && (PACK || SYSTEMS.find(x => x.name === chosenSystem())?.pack) ? "rules" : "story",
       appearance: S.imagesEnabled ? $("nAppearance").value : "" }) });
     NEW = { seed: "", history: [], at: -1 };
     PORT = { history: [], at: -1 };
