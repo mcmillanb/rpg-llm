@@ -1819,6 +1819,36 @@ if (matchMedia("(pointer: coarse)").matches) $("input").placeholder = "What do y
   }, 300));
 })();
 
+// Turning a phone reflows the whole story, and some browsers lose the scroll position doing it
+// (back at the first message). Remember where the reader is (at the end, or which message is at
+// the top) and put them back there once the new layout has settled.
+(function keepPlace() {
+  const m = $("main");
+  let atEnd = true, anchor = null, off = 0, settling = 0, queued = false;
+  const note = () => {
+    queued = false;
+    if (settling) return;
+    atEnd = m.scrollHeight - m.scrollTop - m.clientHeight < 60;
+    const top = m.getBoundingClientRect().top;
+    anchor = [...$("view").children].find(el => el.getBoundingClientRect().bottom > top) || null;
+    if (anchor) { const r = anchor.getBoundingClientRect(); off = (top - r.top) / (r.height || 1); }  // how far into it
+  };
+  m.addEventListener("scroll", () => { if (!queued) { queued = true; requestAnimationFrame(note); } }, { passive: true });
+  const restore = () => {
+    if (atEnd) { m.scrollTop = m.scrollHeight; return; }
+    if (!anchor || !anchor.isConnected) return;
+    const r = anchor.getBoundingClientRect();
+    m.scrollTop += r.top + off * r.height - m.getBoundingClientRect().top;
+  };
+  const resized = () => {
+    clearTimeout(settling);
+    requestAnimationFrame(restore);
+    settling = setTimeout(() => { restore(); settling = 0; }, 400);
+  };
+  window.addEventListener("resize", resized);
+  if (screen.orientation) screen.orientation.addEventListener("change", resized);
+})();
+
 // ---- wiring --------------------------------------------------------------
 function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; }
 $("input").addEventListener("input", autosize);
