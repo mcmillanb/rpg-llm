@@ -1830,3 +1830,16 @@ def test_narrativium_test_line_without_request_roll_gets_a_button():
     assert dice.trait_request("**Test: City Watch, d10**\n\nWhat do you do?", "1") is None  # not the end
     assert dice.trait_request("A d10 is on the table.", "1") is None
     assert dice.trait_request("**Climb: Tall, d8**", "1") is None  # the d8 is never the player's
+
+
+def test_feedback_is_saved_with_game_and_message_number(tmp_path):
+    settings = Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(gatekeeper_enabled=False)))
+    rt = Runtime(settings, dm=FakeLLM(), router_llm=FakeLLM(), archiver=FakeLLM())
+    with TestClient(create_app(rt)) as client:
+        slug = client.post("/api/campaigns", json={"name": "Ankh"}).json()["slug"]
+        c = rt.vault.get(slug)
+        play(c, ("I look around", "Fog."))
+        assert client.post(f"/api/campaigns/{slug}/feedback", json={"content": "  "}).status_code == 400
+        assert client.post(f"/api/campaigns/{slug}/feedback", json={"content": "No d10 button"}).json()["ok"]
+    text = (tmp_path / "feedback.txt").read_text()
+    assert "Ankh [" in text and "after message #2" in text and "admin" in text and "No d10 button\n" in text

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from rpg_llm import images, prompts
+from rpg_llm import images, packs, prompts
 from rpg_llm.config import ImageGen
 from rpg_llm.llm import LLMClient
 from rpg_llm.vault import Campaign, slugify
@@ -23,9 +23,18 @@ DESCRIBE_SCHEMA = {
 }
 
 
+def art(system: str) -> dict:
+    """A pack's art direction: style (replaces the painterly look), negative, notes (for the
+    prompt writer: what the setting's people look like)."""
+    return (packs.match(system) or {}).get("art") or {}
+
+
 async def describe(dm: LLMClient, system: str, premise: str, appearance: str = "",
                    avoid: list[str] | None = None) -> dict:
     """Appearance + image prompt. A given appearance (the player's edit) is kept as is."""
+    notes = art(system).get("notes")
+    if notes:
+        premise = f"{premise.strip()}\n\nArt direction for this game: {notes.strip()}"
     appearance_text = (f"\nThe player has described the look; keep it exactly: {appearance.strip()}\n"
                        if appearance.strip() else "")
     avoid_text = ("\nEarlier attempts (vary the pose, expression, framing and background):\n"
@@ -38,8 +47,11 @@ async def describe(dm: LLMClient, system: str, premise: str, appearance: str = "
     return d
 
 
-async def paint(cfg: ImageGen, look: str, prompt: str) -> bytes:
-    return await images.generate(cfg, images.portrait_prompt(look, prompt), SIZE, SIZE)
+async def paint(cfg: ImageGen, look: str, prompt: str, system: str = "") -> bytes:
+    a = art(system)
+    negative = images.NEGATIVE + (f", {a['negative']}" if a.get("negative") else "")
+    return await images.generate(cfg, images.portrait_prompt(look, prompt, a.get("style", "")), SIZE, SIZE,
+                                 negative=negative)
 
 
 # ---- candidates during setup -------------------------------------------------
@@ -173,7 +185,7 @@ async def paint_person(cfg: ImageGen, look: str, p: dict, system: str) -> bytes:
     if not_human(p):
         return await images.generate(cfg, images.presence_prompt(look, prompt), SIZE, SIZE,
                                      negative=images.PRESENCE_NEGATIVE)
-    return await paint(cfg, look, prompt)
+    return await paint(cfg, look, prompt, system)
 
 
 def person_prompt(p: dict, system: str) -> str:

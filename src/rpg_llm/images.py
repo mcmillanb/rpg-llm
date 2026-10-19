@@ -134,6 +134,9 @@ def presence_prompt(look: str, prompt: str) -> str:
     return PRESENCE_STYLE.format(look=LOOKS.get(look, LOOKS["plain"]), prompt=prompt)
 
 
-def portrait_prompt(look: str, prompt: str) -> str:
+def portrait_prompt(look: str, prompt: str, style: str = "") -> str:
+    """`style`: a game's own art direction (a pack's art.style), in place of the painterly look."""
+    if style:
+        return f"Head-and-shoulders character portrait, {style.strip()} Looking slightly off-camera, no text. {prompt}"
     return PORTRAIT_STYLE.format(look=LOOKS.get(look, LOOKS["plain"]), light=LIGHT.get(look, BRIGHT),
                                  prompt=prompt)

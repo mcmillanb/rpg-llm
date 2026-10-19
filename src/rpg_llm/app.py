@@ -182,10 +182,11 @@ class Runtime:
         cfg = self.settings.app.images
         if cfg.enabled and not portrait.current(c) and c.meta.get("appearance"):
             async def paint():
-                d = await portrait.describe(self.dm, c.meta.get("system") or "", c.meta.get("premise") or "",
+                d = await portrait.describe(self.dm, c.meta.get("system") or "", portrait_premise(c),
                                             c.meta.get("appearance") or "")
                 look = c.meta.get("theme") or themes.default_for(c.meta.get("system") or "")
-                portrait.add(c, await portrait.paint(cfg, look, d["prompt"]), d["prompt"])
+                portrait.add(c, await portrait.paint(cfg, look, d["prompt"], c.meta.get("system") or ""),
+                             d["prompt"])
             await self.run_quietly(paint(), "portrait after session 0")
 
     async def paint_people(self, c: Campaign) -> None:
@@ -700,6 +701,17 @@ async def repair_roll(rt: Runtime, c: Campaign, convo: list[dict], reply: str) -
         return None
 
 
+def portrait_premise(c: Campaign, sh: dict | None = None) -> str:
+    """What the portrait is painted from: name, concept, the sheet's species-like fields
+    (an Igor shouldn't come out as 'a tall man') and the premise."""
+    sh = sh if sh is not None else (sheet.load(c) or {})
+    kind = [f"{k.replace('_', ' ').title()}: {v}" for k, v in (sh.get("system") or {}).items()
+            if k in ("background", "species", "ancestry", "heritage", "race", "community", "origin")
+            and isinstance(v, str) and v.strip()]
+    head = (f"{sh.get('name', '')}: {sh.get('concept', '')}\n" if sh else "") + "".join(f"{k}\n" for k in kind)
+    return head + (c.meta.get("premise") or c.brief)
+
+
 def people_art(c: Campaign) -> list[dict]:
     """For the chat's NPC avatars: each person with a portrait, and the names to spot them by."""
     index = portrait.people_index(c)
@@ -953,7 +965,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(409, "No image generator is set up (admin → Image generation).")
         d = await portrait.describe(rt.dm, body.system, body.premise, body.appearance, body.avoid)
         try:
-            webp = await portrait.paint(cfg, resolve_look(body.look, body.system, body.genre), d["prompt"])
+            webp = await portrait.paint(cfg, resolve_look(body.look, body.system, body.genre), d["prompt"],
+                                        body.system)
         except images.ImageError as e:
             raise HTTPException(502, str(e))
         token = portrait.save_candidate(rt.vault.root, webp, d)
@@ -991,12 +1004,11 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(409, "No image generator is set up (admin → Image generation).")
         sh = sheet.load(c) or {}
         appearance = body.appearance.strip() or sh.get("appearance") or c.meta.get("appearance", "")
-        premise = (f"{sh.get('name', '')}: {sh.get('concept', '')}\n" if sh else "") + \
-            (c.meta.get("premise") or c.brief)
+        premise = portrait_premise(c, sh)
         avoid = [c.meta["portrait_prompt"]] if c.meta.get("portrait_prompt") else []
         d = await portrait.describe(rt.dm, c.meta.get("system") or "", premise, appearance, avoid)
         try:
-            webp = await portrait.paint(cfg, c.meta.get("theme") or "plain", d["prompt"])
+            webp = await portrait.paint(cfg, c.meta.get("theme") or "plain", d["prompt"], c.meta.get("system") or "")
         except images.ImageError as e:
             raise HTTPException(502, str(e))
         name = portrait.add(c, webp, d["prompt"])
@@ -1109,6 +1121,24 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             raise HTTPException(400, "empty message")
         c.append({"role": "user", "content": body.content.strip()})
         return stream_turn(rt, c)
+
+    @app.post("/api/campaigns/{slug}/feedback")
+    async def feedback(slug: str, body: Say):
+        """A player's note for the admin: appended to feedback.txt at the vault's root."""
+        rt = R()
+        c = rt.campaign(slug)
+        text = body.content.strip()[:5000]
+        if not text:
+            raise HTTPException(400, "empty feedback")
+        u = auth.current()
+        msgs = c.messages()
+        name = (sheet.load(c) or {}).get("name") or ""
+        head = (f"=== {time.strftime('%Y-%m-%d %H:%M')} · {u.username if u else 'admin'}"
+                f"{f' (playing {name})' if name else ''} · {c.meta.get('name') or slug} [{slug}]"
+                f" · after message #{msgs[-1]['id'] if msgs else 0}")
+        with open(rt.vault.root / "feedback.txt", "a") as f:
+            f.write(f"{head}\n{text}\n\n")
+        return {"ok": True}
 
     @app.post("/api/campaigns/{slug}/regenerate")
     async def regenerate(slug: str):

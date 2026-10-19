@@ -409,6 +409,7 @@ body[data-look] #tray { backdrop-filter: blur(10px); }
       <div class="composer">
         <textarea id="input" rows="1" autocomplete="off" enterkeyhint="send" placeholder="What do you do?  (Esc stops a reply and takes your message back · ↑ edits your last message)"></textarea>
         <button id="diceBtn" class="hidden" title="Dice tray: roll any dice, for fun or for the GM" aria-label="Dice tray">🎲</button>
+        <button id="feedbackBtn" title="Send feedback about the game or the app" aria-label="Send feedback">💬</button>
         <button id="artBtn" class="hidden" title="View the artwork (click again, or Esc, to bring the messages back)" aria-label="View the artwork">👁</button>
         <button id="send" class="primary">Send</button>
       </div>
@@ -1888,6 +1889,32 @@ function toggleArt(on = !document.body.dataset.viewart) {
   $("artBtn").title = on ? "Bring the messages back (Esc)" : "View the artwork (click again, or Esc, to bring the messages back)";
 }
 $("artBtn").onclick = () => toggleArt();
+
+// Feedback: a note for the admin, saved with the game, message number and player
+function openFeedback() {
+  $("modal").innerHTML = `<div class="sheet ui">
+    <div class="sheethead"><strong>Feedback</strong><button id="fbClose">✕</button></div>
+    <div class="muted small">Something wrong, odd or great? It's saved for review with this game and the latest message.</div>
+    <textarea id="fbText" rows="6" placeholder="What happened?"></textarea>
+    <div class="row-actions"><button class="primary" id="fbSend">Send</button><button id="fbCancel">Cancel</button><span id="fbNote" class="muted"></span></div>
+  </div>`;
+  $("modal").classList.remove("hidden");
+  $("fbText").focus();
+  const close = () => $("modal").classList.add("hidden");
+  $("fbClose").onclick = close; $("fbCancel").onclick = close;
+  $("modal").onclick = (e) => { if (e.target === $("modal")) close(); };
+  $("fbSend").onclick = async () => {
+    const text = $("fbText").value.trim();
+    if (!text) return $("fbText").focus();
+    $("fbSend").disabled = true;
+    try {
+      await api(`/api/campaigns/${S.slug}/feedback`, { method: "POST", body: JSON.stringify({ content: text }) });
+      $("fbNote").textContent = "Thanks, saved.";
+      setTimeout(close, 900);
+    } catch (e) { $("fbNote").textContent = e.message; $("fbSend").disabled = false; }
+  };
+}
+$("feedbackBtn").onclick = openFeedback;
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("lightbox").classList.contains("hidden")) { e.preventDefault(); closePortrait(); return; }
   if (e.key === "Escape" && document.body.dataset.viewart) { e.preventDefault(); toggleArt(false); return; }

@@ -566,8 +566,10 @@ Return JSON:
   flight jacket...) and one distinctive detail. Keep to anything the premise says; invent the
   rest to fit.
 - prompt: an image prompt of 40-70 words for a head-and-shoulders portrait: the appearance,
-  expression and pose, plus a hint of a background from their world. Visual description only:
-  no names, no story, no text in the image."""
+  expression and pose, plus a hint of a background from their world. If they aren't human (a
+  dwarf, a troll, an Igor, an android...), say so first and paint what that kind looks like:
+  never just "a man" or "a woman". Visual description only: no names, no story, no text in the
+  image."""
 
 ROLL_REPAIR = """\
 [GM NOTES] Your reply asks the player to roll, but you didn't call request_roll, so no dice
