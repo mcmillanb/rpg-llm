@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 .env
 vault/
+
+# Licensed rulebooks and packs built from them: this server only
+restricted/

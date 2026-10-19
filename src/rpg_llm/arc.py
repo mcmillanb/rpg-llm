@@ -4,7 +4,7 @@ campaign setup and revised between sessions when play diverges. Never shown to t
 import re
 import time
 
-from rpg_llm import prompts, wiki
+from rpg_llm import packs, prompts, wiki
 from rpg_llm.llm import NO_THINKING, LLMClient
 from rpg_llm.vault import Campaign
 
@@ -43,6 +43,12 @@ def _save(campaign: Campaign, text: str, why: str) -> None:
     campaign.write(FILE, f"{text.strip()}\n\n<!-- {stamp}: {why} -->\n")
 
 
+def _flavour(meta: dict) -> str:
+    """A pack's notes on the setting's style (pack.yaml 'flavour'), for an arc that sounds like it."""
+    f = ((packs.for_campaign(meta) or {}).get("flavour") or "").strip()
+    return f"\nSetting and style: {f}" if f else ""
+
+
 async def generate(campaign: Campaign, archiver: LLMClient) -> str:
     """Write the arc. For a campaign already under way, it builds from the brief."""
     meta = campaign.meta
@@ -53,7 +59,7 @@ async def generate(campaign: Campaign, archiver: LLMClient) -> str:
                                  'invent one that suits the game)'}\n")
     msg = await archiver.chat(
         [{"role": "user", "content": prompts.ARC_TASK.format(
-            system=meta.get("system") or "unspecified",
+            system=(meta.get("system") or "unspecified") + _flavour(meta),
             consequences=STAKES.get(meta.get("consequences"), STAKES["normal"]),
             situation=situation)}],
         max_tokens=2500, temperature=0.8, extra_body=NO_THINKING)

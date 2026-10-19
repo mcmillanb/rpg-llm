@@ -11,4 +11,6 @@ services:
     volumes:
       # Host folder for the campaign vault (open it in Obsidian). Change the left side freely.
       - ./vault:/vault
+      # Packs built from licensed rulebooks: on this server only (git- and docker-ignored).
+      - ./restricted/packs:/restricted/packs:ro
     restart: unless-stopped

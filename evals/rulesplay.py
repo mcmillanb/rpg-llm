@@ -29,9 +29,11 @@ SYSTEMS = {
                    "quick-witted, stubborn, and better with a ship than with people."),
     "ironsworn": ("Ironsworn", "A hunter from a small village who swore to track down the beast that "
                   "killed her brother; quiet, stubborn, deadly with a bow."),
+    "discworld": ("Discworld: Adventures in Ankh-Morpork", "A junior wizard at Unseen University who is "
+                  "better at dodging lectures than at magic, and keen to prove himself to the Archchancellor."),
 }
 # the dice tray's roll when the GM asks in words with no button
-TRAY = {"starforged": "1D6", "ironsworn": "1D6"}
+TRAY = {"starforged": "1D6", "ironsworn": "1D6", "discworld": "1D10"}
 
 # play: every few turns a move that should change the sheet
 PUSH_IRONSWORN = [
@@ -41,6 +43,14 @@ PUSH_IRONSWORN = [
     "I set out on the journey to where the trail leads.",
     "I try to win this person's trust and make a real connection.",
     "I push on to finish what I started here.",
+]
+PUSH_DISCWORLD = [
+    "I try something risky and clever to get past the problem, using my best Trait.",
+    "If that went badly, I spend a Luck to get out of the Consequence.",
+    "I try to talk my way past them, bluffing outrageously.",
+    "I sneak in somewhere I'm definitely not allowed.",
+    "I cast a small spell to sort this out.",
+    "I have a real moment here: this is who I am. I want it as my Core.",
 ]
 PUSH = [
     "I attack the nearest enemy with my best weapon.",
@@ -187,7 +197,7 @@ async def main():
         n += 1
     record("session0_done", steps=n, finished=not get(base, f"/api/campaigns/{slug}")["session0"])
     for i in range(1, a.turns + 1):
-        pushes = PUSH_IRONSWORN if a.system in TRAY else PUSH
+        pushes = PUSH_DISCWORLD if a.system == "discworld" else PUSH_IRONSWORN if a.system in TRAY else PUSH
         push = pushes[(i // 3) % len(pushes)] if i % 3 == 0 else None
         await step(push, "play")
     record("end", slug=slug, sheet=snapshot(base, slug))

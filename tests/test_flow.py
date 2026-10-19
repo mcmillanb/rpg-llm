@@ -1274,6 +1274,58 @@ def test_dice_notation_keep_and_duality(monkeypatch):
     assert "Hope 7, Fear 7 + 3 + 1 = 18" in dice.player_line(r) and "Critical" in dice.player_line(r)
 
 
+def test_narrativium_outcome_die_against_the_d8(monkeypatch):
+    assert dice.outcome_die("1D10") == 10 and dice.outcome_die("d4") == 4
+    assert dice.outcome_die("1D8") is None and dice.outcome_die("1D10+1") is None and dice.outcome_die("2D6") is None
+    for faces, result in (([6, 3], "success"), ([2, 4], "failure"), ([4, 4], "success with Consequences")):
+        seq = iter([f - 1 for f in faces])
+        monkeypatch.setattr(dice.secrets, "randbelow", lambda n: next(seq))
+        r = dice.roll("1D10", "Climb the Tower of Art: Second-storey work", narrativium=True)
+        assert (r["rolls"], r["sides"], r["narrativium"]["result"]) == (faces, [10, 8], result)
+        assert f"Outcome {faces[0]} vs Narrativium {faces[1]}" in dice.player_line(r)
+    assert "1 Luck" in dice.describe(r if r["narrativium"]["result"] == "failure" else {**r, "narrativium": {**r["narrativium"], "result": "failure"}})
+    seq = iter([0, 7])  # a spell that fails just fizzles
+    monkeypatch.setattr(dice.secrets, "randbelow", lambda n: next(seq))
+    r = dice.roll("1D6", "Spell: Imp-Possible Book-Looker", narrativium=True)
+    assert r["narrativium"]["magic"] and "fizzles" in dice.describe(r)
+    seq = iter([4, 7])  # without the pack's flag, a d10 is just a d10; a d20 table roll never is a test
+    monkeypatch.setattr(dice.secrets, "randbelow", lambda n: next(seq))
+    assert "narrativium" not in dice.roll("1D10") and "narrativium" not in dice.roll("1D20", narrativium=True)
+
+
+def test_narrativium_requests_never_hand_the_player_the_d8(monkeypatch):
+    from rpg_llm import app as appmod
+    monkeypatch.setattr(appmod.packs, "for_campaign", lambda meta: {"narrativium": True, "check": "1D10"})
+
+    class C:
+        meta = {"mode": "rules"}
+    assert appmod.outcome_dice(C(), "1D8") == "1D10" and appmod.outcome_dice(C(), "d12+2") == "1D12"
+    assert appmod.outcome_dice(C(), "1D20") == "1D20" and appmod.outcome_dice(C(), "2D6") == "2D6"
+    C.meta = {"mode": "rules", "session0": True}  # session 0's table rolls are left alone
+    assert appmod.outcome_dice(C(), "1D8") == "1D8"
+
+
+def test_private_packs_load_from_their_own_folder(tmp_path, monkeypatch):
+    from rpg_llm import packs
+    d = tmp_path / "secretgame"
+    d.mkdir()
+    (d / "pack.yaml").write_text("id: secretgame\nname: Secret Game\nmatches: [secret game]\nsheet: []\n")
+    (d / "rules.md").write_text("Roll well.")
+    (d / "reference.jsonl").write_text(json.dumps({"title": "Rolling", "category": "core rules", "text": "Roll well."}) + "\n")
+    monkeypatch.setattr(packs, "PRIVATE", [tmp_path])
+    for f in (packs.all_packs, packs.pack_dir, packs.reference):
+        f.cache_clear()
+    try:
+        p = packs.match("The Secret Game")
+        assert p["id"] == "secretgame" and p["rules"] == "Roll well." and packs.has_reference(p)
+        assert packs.search("secretgame", "rolling")[0]["title"] == "Rolling"
+        assert packs.match("Daggerheart")["id"] == "daggerheart"  # the built-in packs still load
+    finally:
+        monkeypatch.undo()
+        for f in (packs.all_packs, packs.pack_dir, packs.reference):
+            f.cache_clear()
+
+
 def test_packs_match_systems_and_shape_the_sheet():
     from rpg_llm import packs
     assert packs.match("Dungeons & Dragons 5e (2024 rules)")["id"] == "dnd5e2024"

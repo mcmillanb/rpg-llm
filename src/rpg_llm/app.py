@@ -331,6 +331,24 @@ def with_stats(c: Campaign, dice_text: str, reason: str = "") -> str:
     return re.sub(rf"\b({_STAT_WORDS})\b", lambda m: str(values.get(m.group(1).lower(), 0)), dice_text, flags=re.I)
 
 
+def narrativium(c: Campaign) -> bool:
+    """Discworld: a lone d4, d6, d10 or d12 is an Outcome die against the Narrativium d8, in play
+    (session 0's table rolls are just table rolls)."""
+    return bool((packs.for_campaign(c.meta) or {}).get("narrativium")) and not session0.active(c.meta)
+
+
+def outcome_dice(c: Campaign, dice_text: str) -> str:
+    """Discworld: the player only ever rolls the Outcome die. A d8 asked for in words (the GM's own
+    Narrativium die) is the usual d10; an Outcome die with a modifier is the die alone."""
+    if not narrativium(c):
+        return dice_text
+    m = re.fullmatch(r"\s*1?\s*d\s*(\d+)\s*(?:[+-]\s*\d+\s*)*", dice_text or "", re.I)
+    if not m:
+        return dice_text
+    return (packs.for_campaign(c.meta) or {}).get("check") or "1D10" if m.group(1) == "8" else \
+        f"1D{m.group(1)}" if m.group(1) in ("4", "6", "10", "12") else dice_text
+
+
 def ironsworn_args(c: Campaign, dice_text: str, reason: str) -> dict | None:
     """Ironsworn and Starforged rolls: the player's momentum and its reset (what burning it would
     do), and for a progress roll the score of the track the reason names."""
@@ -394,6 +412,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
     convo = context.build(c, state, messages, notes)
     tools = list(wiki.TOOLS) if c.gazetteer() else []  # nothing to look up yet
     duality = bool((packs.for_campaign(c.meta) or {}).get("duality"))
+    narr = narrativium(c)
     mode = context.table(c.meta)["dice"]
     in_session0 = session0.active(c.meta)
     if in_session0:
@@ -478,7 +497,10 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
                     if in_session0 and dice.asks_choice(content):  # "Which table do you choose?"
                         raise ValueError("not requested: your reply asks the player to choose first. "
                                          "End it with that question, and request the roll once they've answered")
-                    rargs["dice"] = with_stats(c, str(rargs.get("dice", "")), str(rargs.get("prompt", "")))
+                    if narr and re.fullmatch(r"\s*1?\s*d\s*8\b.*", str(rargs.get("dice", "")), re.I):
+                        raise ValueError("not requested: the d8 is your Narrativium die, which the app rolls. "
+                                         "Ask for the player's Outcome die: 1D4, 1D6, 1D10 or 1D12")
+                    rargs["dice"] = outcome_dice(c, with_stats(c, str(rargs.get("dice", "")), str(rargs.get("prompt", ""))))
                     requested = dice.request(rargs, dice.roll_under_system(c.meta.get("system") or ""))
                     yield sse({"type": "roll_request", **requested})
                     break
@@ -492,7 +514,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
                                   args.get("target"), args.get("success_if") or "at_least",
                                   duality=duality, floor=roll_floor(c, str(args.get("dice", "")),
                                                                     str(args.get("reason", ""))),
-                                  ironsworn=ironsworn_args(c, str(args.get("dice", "")), str(args.get("reason", ""))))
+                                  ironsworn=ironsworn_args(c, str(args.get("dice", "")), str(args.get("reason", ""))),
+                                  narrativium=narr)
                     rolls.append(r)
                     result = dice.describe(r)
                     yield sse({"type": "roll", **r})
@@ -563,6 +586,7 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
             requested = await repair_roll(rt, c, convo, content) or \
                 dice.standard_request(ask, c.meta.get("system") or "", f"{user['id']}")
     if requested:
+        requested["dice"] = outcome_dice(c, requested["dice"])
         entry["roll_request"] = requested
     if supersedes:
         entry["supersedes"] = supersedes
@@ -1041,6 +1065,7 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
                 "session0": session0.active(c.meta),
                 "duality": bool((packs.for_campaign(c.meta) or {}).get("duality")),
                 "ironsworn": bool((packs.for_campaign(c.meta) or {}).get("ironsworn")),
+                "narrativium": narrativium(c),
                 "table": context.table(c.meta),
                 "portrait": portrait.current(c),
                 "show_details": bool(c.meta.get("show_details")),
@@ -1226,7 +1251,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
         r = dice.roll(req["dice"], req["prompt"], req.get("target"), req.get("success_if", "at_least"),
                       duality=bool((packs.for_campaign(c.meta) or {}).get("duality")),
                       floor=roll_floor(c, req["dice"], req["prompt"]),
-                      ironsworn=ironsworn_args(c, req["dice"], req["prompt"]))
+                      ironsworn=ironsworn_args(c, req["dice"], req["prompt"]),
+                      narrativium=narrativium(c))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})
         return stream_turn(rt, c, first={"type": "rolled", "roll": r, "message": entry})
 
@@ -1241,7 +1267,8 @@ def create_app(rt: Runtime | None = None) -> FastAPI:
             r = dice.roll(body.dice, body.reason.strip()[:120],
                           duality=bool((packs.for_campaign(c.meta) or {}).get("duality")),
                           floor=roll_floor(c, body.dice, body.reason),
-                          ironsworn=ironsworn_args(c, body.dice, body.reason))
+                          ironsworn=ironsworn_args(c, body.dice, body.reason),
+                          narrativium=narrativium(c))
         except ValueError as e:
             raise HTTPException(400, str(e))
         entry = c.append({"role": "user", "content": dice.player_line(r), "roll": r})

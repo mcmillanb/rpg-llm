@@ -24,7 +24,7 @@ REQUEST_TOOL = {"type": "function", "function": {
                    "dice; the prompt is a few words. Call it as a tool: never write its "
                    "arguments into the story.",
     "parameters": {"type": "object", "properties": {
-        "dice": {"type": "string", "description": "e.g. 2D6+1, d20+3, 2D20KH1+3 (advantage), 2D20KL1+3 (disadvantage), 2D12+2 (Daggerheart), d100; Ironsworn: 1D6+iron+1 (an action roll: the stat by name, the challenge dice are added) or progress (a progress roll: name the track in the prompt)"},
+        "dice": {"type": "string", "description": "e.g. 2D6+1, d20+3, 2D20KH1+3 (advantage), 2D20KL1+3 (disadvantage), 2D12+2 (Daggerheart), d100; Ironsworn: 1D6+iron+1 (an action roll: the stat by name, the challenge dice are added) or progress (a progress roll: name the track in the prompt); Discworld: the Outcome die alone, 1D4, 1D6, 1D10 or 1D12 (the app rolls the Narrativium d8)"},
         "prompt": {"type": "string", "description": "a few words, e.g. 'Roll to attack the goblin'"},
         "target": {"type": "integer", "description": "number to compare against (optional)"},
         "success_if": {"type": "string", "enum": ["at_least", "at_most"],
@@ -199,14 +199,64 @@ def _challenge_note(r: dict) -> str:
     return text
 
 
+def outcome_die(dice: str) -> int | None:
+    """Discworld: the Outcome die is one d4, d6, d10 or d12 and nothing else ('1D10')."""
+    try:
+        ts, mod = terms(dice)
+    except ValueError:
+        return None
+    ok = len(ts) == 1 and ts[0]["count"] == 1 and ts[0]["sides"] in (4, 6, 10, 12) and not ts[0]["keep"] \
+        and ts[0]["sign"] > 0 and not mod
+    return ts[0]["sides"] if ok else None
+
+
+_MAGIC = re.compile(r"\b(?:spell|magic\w*|cast(?:s|ing)?|thaum\w*|enchant\w*)\b", re.I)
+
+
+def narrativium_roll(dice: str, reason: str = "") -> dict:
+    """The Outcome die against the GM's Narrativium d8: higher succeeds, the d8 higher fails,
+    equal succeeds with Consequences. A spell (named in the reason) turns it round: success brings
+    the Magical Consequence, failure just fizzles."""
+    sides = outcome_die(dice)
+    o, n = secrets.randbelow(sides) + 1, secrets.randbelow(8) + 1
+    result = "success" if o > n else "success with Consequences" if o == n else "failure"
+    return {"dice": f"1D{sides}", "reason": reason.strip(), "rolls": [o, n], "modifier": 0, "total": o,
+            "sides": [sides, 8], "narrativium": {"outcome": o, "narrativium": n, "result": result,
+                                                 "magic": bool(_MAGIC.search(reason))}}
+
+
+def _narrativium_note(r: dict) -> str:
+    nv = r.get("narrativium")
+    if not nv:
+        return ""
+    o, n, res = nv["outcome"], nv["narrativium"], nv["result"]
+    text = f" {res.upper()}: Outcome die {o} against the Narrativium die {n}"
+    text += f" (by {abs(o - n)})." if o != n else " (a tie)."
+    if nv["magic"]:
+        text += {"success": " A spell: it works, and the Magical Consequence comes with it (it can't be "
+                            "avoided with Luck).",
+                 "success with Consequences": " A spell: it works, with its Magical Consequence, and the tie "
+                                              "brings a further twist.",
+                 "failure": " A spell: it fizzles, and that's the Consequence (the Luck is spent anyway)."}[res]
+        return text + " If this wasn't a spell, read it as an ordinary test."
+    if res == "failure":
+        text += (" Narrate how close it came and the looming Consequence, then offer the player 1 Luck to "
+                 "avoid it (they have the final say); if they don't, it lands, perhaps as a new Trait.")
+    elif res == "success with Consequences":
+        text += " They get what they wanted, and the world pushes back: a Consequence too."
+    return text
+
+
 def roll(dice: str, reason: str = "", target: int | None = None,
          success_if: str = "at_least", duality: bool = False, floor: int = 0,
-         ironsworn: dict | None = None) -> dict:
+         ironsworn: dict | None = None, narrativium: bool = False) -> dict:
     """Roll it. `duality`: Daggerheart, where a roll starting 2D12 is the Hope die and the Fear
     die: which is higher decides "with Hope" or "with Fear", and matching dice are a critical.
     `floor`: the first term's dice count at least this (Great Weapon Fighting: 1s and 2s are 3s).
     `ironsworn`: {momentum, reset, progress}: an action roll ('1D6+2') or a progress roll
     ('PROGRESS') is made against the challenge dice."""
+    if narrativium and outcome_die(dice):
+        return narrativium_roll(dice, reason)
     if ironsworn is not None and (progress_notation(dice) or action_die(dice)):
         return challenge_roll(dice, reason, ironsworn.get("momentum"), ironsworn.get("reset", 2),
                               ironsworn.get("progress"), ironsworn.get("track"))
@@ -251,6 +301,8 @@ def roll(dice: str, reason: str = "", target: int | None = None,
 
 def _dice_text(r: dict) -> str:
     """'17 + [6]' (a dropped die in brackets), or 'Hope 7, Fear 11' for Duality Dice."""
+    if r.get("narrativium"):
+        return f"Outcome {r['rolls'][0]} vs Narrativium {r['rolls'][1]}"
     if r.get("challenge"):
         c = r["challenge"]["challenge"]
         if r["challenge"]["kind"] == "progress":
@@ -298,6 +350,9 @@ def _gwf_note(r: dict) -> str:
 def describe(r: dict) -> str:
     """What the GM reads back."""
     mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
+    if r.get("narrativium"):
+        return (f"{r['dice']} for {r['reason'] or 'the test'}: rolled {_dice_text(r)}."
+                + _narrativium_note(r) + " Narrate from this result.")
     if r.get("challenge"):
         return (f"{r['dice']} for {r['reason'] or 'the move'}: rolled {_dice_text(r)}."
                 + _challenge_note(r) + " Narrate from this result.")
@@ -313,6 +368,8 @@ def describe(r: dict) -> str:
 def player_line(r: dict) -> str:
     """The player's turn after an on-screen roll, as the GM reads it."""
     mod = f" {'+' if r['modifier'] > 0 else '-'} {abs(r['modifier'])}" if r["modifier"] else ""
+    if r.get("narrativium"):
+        return f"🎲 {r['reason'] or 'Test'}: {r['dice']} → {_dice_text(r)}." + _narrativium_note(r)
     if r.get("challenge"):
         return f"🎲 {r['reason'] or 'Roll'}: {r['dice']} → {_dice_text(r)}." + _challenge_note(r)
     text = f"🎲 {r['reason'] or 'Roll'}: {r['dice']} → {_dice_text(r)}{mod} = {r['total']}"

@@ -8,6 +8,7 @@ A campaign in Rules mode uses its pack's sheet and session 0; in Story mode the 
 the dice conventions, and the rules summary for systems the GM model doesn't know.
 """
 
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -15,12 +16,26 @@ from pathlib import Path
 import yaml
 
 DIR = Path(__file__).parent
+# Packs built from licensed books stay on this server: a folder outside git and the image, mounted
+# into the container (docker-compose.yml), and looked for beside the source when run directly.
+PRIVATE = [Path(p) for p in os.environ.get("PRIVATE_PACKS", "/restricted/packs").split(os.pathsep) if p] + \
+    [DIR.parents[2] / "restricted" / "packs"]
+
+
+def _dirs() -> list[Path]:
+    return [DIR] + [d for d in PRIVATE if d.is_dir()]
+
+
+@lru_cache
+def pack_dir(pack_id: str) -> Path:
+    return next((d / pack_id for d in _dirs() if (d / pack_id / "pack.yaml").exists()), DIR / pack_id)
 
 
 @lru_cache
 def all_packs() -> dict[str, dict]:
     out = {}
-    for d in sorted(p for p in DIR.iterdir() if (p / "pack.yaml").exists()):
+    for d in sorted((p for root in _dirs() for p in root.iterdir() if (p / "pack.yaml").exists()),
+                    key=lambda p: p.name):
         pack = yaml.safe_load((d / "pack.yaml").read_text())
         pack["rules"] = (d / "rules.md").read_text().strip() if (d / "rules.md").exists() else ""
         pack["creation"] = "\n\n".join(
@@ -88,7 +103,7 @@ def _words(text: str) -> list[str]:
 
 @lru_cache
 def reference(pack_id: str) -> list[dict]:
-    p = DIR / pack_id / "reference.jsonl"
+    p = pack_dir(pack_id) / "reference.jsonl"
     if not p.exists():
         return []
     out = []
@@ -189,7 +204,7 @@ def explain(pack: dict, field: str, name: str) -> str:
 
 
 def has_reference(pack: dict | None) -> bool:
-    return bool(pack) and (DIR / pack["id"] / "reference.jsonl").exists()
+    return bool(pack) and (pack_dir(pack["id"]) / "reference.jsonl").exists()
 
 
 @lru_cache
@@ -246,7 +261,7 @@ ODDS = {"small chance": 10, "unlikely": 25, "50/50": 50, "likely": 75, "almost c
 
 @lru_cache
 def oracles(pack_id: str) -> list[dict]:
-    p = DIR / pack_id / "oracles.json"
+    p = pack_dir(pack_id) / "oracles.json"
     return __import__("json").loads(p.read_text()) if p.exists() else []
 
 
