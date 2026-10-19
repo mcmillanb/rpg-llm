@@ -1605,14 +1605,19 @@ function sheetFieldsHTML(fields, sh, lists) {
     ? `<label>${SHEET_LABELS[f] || f} <span class="muted">(one per line)</span></label><textarea data-f="${f}" rows="${Math.max(2, (sh[f] || []).length + 1)}">${esc((sh[f] || []).join("\n"))}</textarea>`
     : `<label>${SHEET_LABELS[f] || f}</label><input data-f="${f}" value="${esc(sh[f] || "")}">`).join("");
 }
-// Each panel edits only its own fields: merge them into the latest sheet before saving.
+// Each panel edits only its own fields: merge them into the latest sheet before saving. Only
+// the fields the player changed are written, so a Consequence or Luck change the GM made while
+// the form was open isn't wiped by the form's older copy.
+const edited = el => el.value !== el.defaultValue;
 async function saveSheetFields(old, done) {
   const body = { ...((await api(`/api/campaigns/${S.slug}/character`)).sheet || old) };
   $("drawerBody").querySelectorAll("[data-f]").forEach(el => {
+    if (!edited(el)) return;
     body[el.dataset.f] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.value;
   });
   const sys = { ...(body.system || {}) };
   $("drawerBody").querySelectorAll("[data-sys]").forEach(el => {
+    if (!edited(el)) return;
     const k = el.dataset.sys;
     if (el.dataset.score) sys[k] = { ...(sys[k] || {}), [el.dataset.score]: +el.value || 0 };
     else sys[k] = el.tagName === "TEXTAREA" ? el.value.split("\n").map(x => x.trim()).filter(Boolean) : el.type === "number" ? +el.value || 0 : el.value;
