@@ -578,8 +578,8 @@ async def play_turn(rt: Runtime, c: Campaign, supersedes: list[int], progress: d
         if pasted:  # the GM wrote the tool call as text: make it real, drop the stray line
             requested, entry["content"] = pasted
         else:
-            requested = dice.request_from_text(content, f"{user['id']}") or \
-                stat_request(c, content, f"{user['id']}")
+            requested = (dice.trait_request(content, f"{user['id']}") if narrativium(c) else None) or \
+                dice.request_from_text(content, f"{user['id']}") or stat_request(c, content, f"{user['id']}")
         ask = None if requested else dice.asked_roll(content)
         if ask:  # asked in words only: have the GM fill in the request, else the usual roll
             yield sse({"type": "status", "text": "setting up the dice…"})

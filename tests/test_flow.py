@@ -1821,3 +1821,12 @@ def test_session0_choice_question_waits_for_the_answer():
     assert dice.asks_choice("Do you want to roll for **Cash** or **Material** benefits?")
     assert not dice.asks_choice("Strength is 6 (DM +0). Next up: Dexterity. Roll 2D6.")
     assert not dice.asks_choice("Which career you pick matters.\n\nRoll 2D6 for Endurance.")
+
+
+def test_narrativium_test_line_without_request_roll_gets_a_button():
+    r = dice.trait_request("The glare is fierce.\n\n**Scout from outside: Unequal Eyes (or Forensics), d10**", "1")
+    assert r["dice"] == "1D10" and r["prompt"] == "Scout from outside: Unequal Eyes (or Forensics)"
+    assert dice.trait_request("**Test: City Watch, d6** (roll 1D6)", "1")["dice"] == "1D6"
+    assert dice.trait_request("**Test: City Watch, d10**\n\nWhat do you do?", "1") is None  # not the end
+    assert dice.trait_request("A d10 is on the table.", "1") is None
+    assert dice.trait_request("**Climb: Tall, d8**", "1") is None  # the d8 is never the player's

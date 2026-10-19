@@ -461,6 +461,20 @@ def request_from_text(text: str, key: str) -> dict | None:
     return req
 
 
+# Discworld: the test named in a closing line with its Outcome die but no request_roll, as the
+# rules show it: "**Sneak past the guard: Second-storey work, d10**" or "**Test: City Watch, d10**"
+_TRAIT_TEST = re.compile(r"^[ \t>*_]*([^\n*]{3,140}?)[,:]?\s*\b1?d(4|6|10|12)\b[^\n]{0,30}?[*_ ]*$", re.M | re.I)
+
+
+def trait_request(text: str, key: str) -> dict | None:
+    """The last 'Test: Trait, d10' line in the reply, as a request for that Outcome die."""
+    m = ([m for m in _TRAIT_TEST.finditer(text or "") if ":" in m.group(1)] or [None])[-1]
+    if not m or text[m.end():].strip():
+        return None
+    return {"id": "t" + hashlib.sha1(f"{key}:{m.group(0)}".encode()).hexdigest()[:11],
+            "dice": f"1D{m.group(2)}", "prompt": m.group(1).strip().rstrip(",:")[:120], "from_text": True}
+
+
 # The GM asked for a roll in words only ("Roll to snag the canister."), with no dice at all.
 _ASK = re.compile(r"^\W*(?:please\s+|now,?\s+|go ahead and\s+)?(?:roll\b|make\s+an?\b.{0,40}\b(?:roll|check|"
                   r"test|save)\b|give me\s+an?\b.{0,40}\b(?:roll|check)\b|time for\s+an?\b.{0,40}\broll\b)",
