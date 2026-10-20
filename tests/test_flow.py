@@ -706,11 +706,11 @@ def test_sheet_guard_keeps_known_money_and_caps_lists():
 
 
 async def test_long_tail_is_condensed_in_the_background_after_a_reply(tmp_path):
-    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(live_tail_pct=10))),
+    rt = Runtime(Settings(Env(vault_path=tmp_path), AppConfig(tuning=Tuning(live_tail_pct=12))),
                  dm=FakeLLM(), router_llm=FakeLLM([verdict(False, 0.9)]),
                  archiver=FakeLLM(chat_reply="Condensed."))
     c = rt.vault.create("T")
-    play(c, *[(f"u{i} " + "x" * 800, f"g{i} " + "y" * 800) for i in range(8)])  # >80% of 10% of 32k
+    play(c, *[(f"u{i} " + "x" * 800, f"g{i} " + "y" * 800) for i in range(10)])  # >80% of 12% of 32k
     await rt.run_track(c)
     state = c.load_state()
     assert state.fold and state.fold["summary"] == "Condensed."
